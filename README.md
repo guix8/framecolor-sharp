@@ -9,7 +9,7 @@ This is a fork of [beko-kerbecotton/framecolor](https://github.com/beko-kerbecot
 - **Sharpness**: AMD FidelityFX CAS, run inside the existing color correction pass, so no extra full-screen pass is added. Standalone apps often render below the panel resolution; this makes the upscaled image look sharper. By default it is applied around the center of each eye and fades out towards the lens edges, which are blurred anyway; this halves its cost (about 0.4 ms instead of 0.8 ms per frame on the Steam Frame). You can switch it to the whole image.
 - **Hold to Compare** and **Auto Compare**: hold the button to see the image without correction, or let it switch every 3 seconds so you can compare inside a game.
 - **Auto presets**: apply a preset by mode (standalone or PC streaming) or for the current SteamVR app.
-- **`framecolorctl bench`**: measure GPU time, frame timing and memory while FrameColor runs.
+- **`framecolorctl bench`**: measure GPU time, frame timing and memory while FrameColor runs, or compare two sharpness values.
 - **Korean interface** and **automatic language selection** that follows the Steam client language.
 - A release build of the Vulkan layer. Upstream's `install.sh` and `package.sh` built it without optimization (proposed upstream in beko-kerbecotton/framecolor#3).
 
@@ -116,6 +116,7 @@ You can also use these commands over SSH:
 ~/.local/bin/framecolorctl status
 ~/.local/bin/framecolorctl doctor
 ~/.local/bin/framecolorctl bench [seconds]   # default 8, 1–60; see Performance
+~/.local/bin/framecolorctl bench --compare A B [pairs]   # sharpness A% vs B% (whole numbers 0–100); pairs 5–60, default 12; see Performance
 ~/.local/bin/framecolorctl disable
 ~/.local/bin/framecolorctl enable
 ~/.local/bin/framecolorctl language          # shows the setting; add en, ja, ko or auto to change it
@@ -135,9 +136,11 @@ The guard cannot guarantee automatic recovery from every failure. Keep a way to 
 - SteamVR's frame timing: frame count, compositor CPU and GPU time, and dropped, mispresented and reprojected frames. SteamVR's compositor GPU time does **not** include FrameColor's pass.
 - memory: RSS of `vrcompositor` and the dashboard, and the GPU memory of `vrcompositor`.
 
+If no frames were presented during the run (for example, the headset was off), it says so instead of showing `vrcompositor`'s GPU time.
+
 It connects as a background app, so it never starts SteamVR, and nothing runs unless you use the command. Measure in the same scene with the dashboard closed, and watch the dropped and reprojected frames first; they are what you notice in the headset.
 
-Other VR overlays change the result a lot. A browser extension that showed a 3D overlay through SteamVR raised `vrcompositor`'s GPU time by roughly 0.5–1 ms per frame, so close such overlays first. Scenes also drift. To compare two settings, switch between them every few seconds many times and compare neighboring intervals, rather than running one long measurement for each. The repository does not include a script for this yet.
+Other VR overlays change the result a lot. A browser extension that showed a 3D overlay through SteamVR raised `vrcompositor`'s GPU time by roughly 0.5–1 ms per frame, so close such overlays first. Scenes also drift. To compare two settings, switch between them every few seconds many times and compare neighboring intervals, rather than running one long measurement for each. `framecolorctl bench --compare A B [pairs]` does this for two sharpness values A and B (whole percent, 0–100). It measures each value for 2 seconds at a time, alternating, for the given number of pairs (one pair is one interval at each value; default 12, about a minute), and prints `vrcompositor`'s GPU time per frame for each value and the difference with its 95% interval. It then restores your settings; Ctrl+C stops it early and still restores them. It does not start, or stops, when no frames are being presented (for example, the headset is not worn), and it will not start while Hold or Auto Compare is on. Do not touch the dashboard while it runs: if anything else changes the settings during the run, it stops and leaves that change in place. If it is ever interrupted uncleanly, your settings from before the run are kept in `~/.config/framecolor/current.txt.bench-backup`, and the next run tells you how to restore them.
 
 FrameColor works on the final image that `vrcompositor` presents after lens distortion: 4320×2160, the two 2160×2160 eyes side by side. That is why sharpening can be limited to the center of each eye.
 
