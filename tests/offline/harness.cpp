@@ -44,10 +44,58 @@ int main(int argc, char** argv) {
     ui.channel = 2; updateSlider(ui, 5, kTrackX + 0.5 * kTrackW); assert(ui.values.sharpen == 0.5);
     ui.channel = 0;
     assert(saveAdvancedValues(ui));
-    { auto v = readCurrent(); assert(v.size() == 14 && v[12] == 0.5 && v[13] == 0.0); }
+    { auto v = readCurrent(); assert(v.size() == 15 && v[12] == 0.5 && v[13] == 0.0 && v[14] == 0.0); }
     Values loaded; loadAdvancedValues(loaded); assert(loaded.sharpen == 0.5);
     { std::ofstream(currentPath()) << "0 0 0 1 1 1 1 1 1 1 1 1\n"; }
     Values fresh; loadAdvancedValues(fresh); assert(fresh.sharpen == 0.0);
+    assert(!loadSharpenWhole());  // older files sharpen the centre of each eye
+
+    // --- Sharpen area button: toggles the 15th value; presets do not change it ---
+    render(fonts, ui, -1, -1, rgba, hits);
+    hit = hitTest(hits, 232 + 74, 697 + 22);
+    assert(hit && hit->kind == HitKind::SharpenArea);
+    assert(hitTest(hits, kTrackX - 20, 719)->kind == HitKind::Slider);  // the button stays clear of the track
+    {
+        VrOverlay* overlayUnused = nullptr;
+        activate(*hit, 0, ui, *overlayUnused);  // SharpenArea does not touch the overlay
+    }
+    assert(ui.sharpenWhole);
+    { auto v = readCurrent(); assert(v.size() == 15 && v[14] == 1.0); }
+    assert(loadSharpenWhole());
+    ui.sharpenWhole = false; assert(saveAdvancedValues(ui) && !loadSharpenWhole());
+
+    // --- Auto compare: starts on the original image, stops on its own ---
+    render(fonts, ui, -1, -1, rgba, hits);
+    hit = hitTest(hits, 1155 - 160 - 15 - 220 - 15 - 100, 42);
+    assert(hit && hit->kind == HitKind::AutoCompare);
+    {
+        VrOverlay* overlayUnused = nullptr;
+        activate(*hit, 0, ui, *overlayUnused);
+        assert(ui.autoCompare && ui.autoOriginal);
+        { auto v = readCurrent(); assert(v[13] == 1.0); }
+        assert(ui.autoCompareEnd - ui.autoCompareTurnEnd == kAutoCompareLength - kAutoCompareTurn);
+        activate(*hit, 0, ui, *overlayUnused);
+        assert(!ui.autoCompare && !ui.autoOriginal);
+        { auto v = readCurrent(); assert(v[13] == 0.0); }
+
+        // The timeline: a switch every 3 s, one switch after a stall, off at 60 s
+        ui.saveMode = true;
+        activate(*hit, 0, ui, *overlayUnused);
+        assert(!ui.saveMode);  // starting auto compare leaves save mode
+        const auto t0 = ui.autoCompareEnd - kAutoCompareLength;
+        assert(!tickAutoCompare(ui, t0 + std::chrono::milliseconds(2900)) && ui.autoOriginal);
+        assert(tickAutoCompare(ui, t0 + kAutoCompareTurn) && !ui.autoOriginal);
+        assert(!tickAutoCompare(ui, t0 + std::chrono::milliseconds(5900)) && !ui.autoOriginal);
+        // After a 10 s stall it switches once and waits a full turn again
+        const auto late = t0 + std::chrono::seconds(16);
+        assert(tickAutoCompare(ui, late) && ui.autoOriginal);
+        assert(!tickAutoCompare(ui, late + std::chrono::milliseconds(250)) && ui.autoOriginal);
+        assert(ui.autoCompareTurnEnd == late + kAutoCompareTurn);
+        assert(tickAutoCompare(ui, t0 + kAutoCompareLength) && !ui.autoCompare && !ui.autoOriginal);
+        assert(!tickAutoCompare(ui, t0 + kAutoCompareLength + kAutoCompareTurn));
+        assert(saveAdvancedValues(ui));
+        { auto v = readCurrent(); assert(v[13] == 0.0); }
+    }
 
     // --- Compare button: hit area, bypass flag in the 14th value ---
     render(fonts, ui, -1, -1, rgba, hits);
@@ -56,7 +104,7 @@ int main(int argc, char** argv) {
     VrOverlay* noOverlay = nullptr;
     activate(*hit, 0, ui, *noOverlay);  // Compare does not touch the overlay
     assert(ui.compare);
-    { auto v = readCurrent(); assert(v.size() == 14 && v[13] == 1.0); }
+    { auto v = readCurrent(); assert(v.size() == 15 && v[13] == 1.0); }
     ui.compare = false; assert(saveAdvancedValues(ui));
     { auto v = readCurrent(); assert(v[13] == 0.0); }
     UiState noLayer;  // compare is disabled when the Vulkan layer is not installed
@@ -155,6 +203,31 @@ int main(int argc, char** argv) {
     assert(findProcess(proc, "framecolor") == 201);
     assert(readRssKb(proc, 200) == 409600);
     assert(readRssKb(proc, 201) == -1 && readRssKb(proc, -1) == -1);
+    // DRM fdinfo, as the msm driver writes it: each client id counts once, other fds are skipped
+    std::filesystem::create_directories(proc / "200" / "fdinfo");
+    std::ofstream(proc / "200" / "fdinfo" / "0") << "pos:\t0\nflags:\t02\n";
+    std::ofstream(proc / "200" / "fdinfo" / "67")
+        << "drm-driver:\tmsm\ndrm-client-id:\t116\ndrm-engine-gpu:\t0 ns\ndrm-cycles-gpu:\t0\n";
+    std::ofstream(proc / "200" / "fdinfo" / "69")
+        << "drm-driver:\tmsm\ndrm-client-id:\t118\ndrm-engine-gpu:\t171714985445 ns\ndrm-cycles-gpu:\t154256749949\n"
+           "drm-maxfreq-gpu:\t903000000 Hz\ndrm-total-memory:\t880204 KiB\ndrm-resident-memory:\t880204 KiB\n";
+    std::ofstream(proc / "200" / "fdinfo" / "70")  // a second fd for client 118
+        << "drm-driver:\tmsm\ndrm-client-id:\t118\ndrm-engine-gpu:\t171714985445 ns\ndrm-cycles-gpu:\t154256749949\n"
+           "drm-resident-memory:\t880204 KiB\n";
+    std::ofstream(proc / "200" / "fdinfo" / "71")  // a client without engine time; memory in MiB
+        << "drm-driver:\tmsm\ndrm-client-id:\t119\ndrm-resident-memory:\t10 MiB\n";
+    const DrmGpuUsage drm = readDrmGpuUsage(proc, 200);
+    assert(drm.engineNs.size() == 2 && drm.engineNs.at("118") == 171714985445ull && drm.engineNs.at("116") == 0);
+    assert(drm.residentKb == 880204 + 10 * 1024);
+    assert(readDrmGpuUsage(proc, 201).engineNs.empty() && readDrmGpuUsage(proc, -1).engineNs.empty());
+    assert(drmMemoryKb("880204 KiB") == 880204 && drmMemoryKb("10 MiB") == 10240 && drmMemoryKb("4096") == 4);
+    assert(drmMemoryKb("0") == 0 && drmMemoryKb("") == 0);
+    // Deltas count only clients present at both readings
+    DrmGpuUsage before, after;
+    before.engineNs = {{"116", 100}, {"118", 1000}, {"120", 50}};
+    after.engineNs = {{"116", 150}, {"118", 1600}, {"121", 99999}};
+    assert(drmEngineDeltaNs(before, after) == 650u);
+    assert(!drmEngineDeltaNs(DrmGpuUsage{}, after));
 
     // --- Language codes and automatic detection ---
     assert(matchLanguage("koreana") == Language::Korean);
@@ -202,9 +275,23 @@ int main(int argc, char** argv) {
         unsetenv("LANG");
         std::filesystem::remove_all(home);
     }
+    // Every string of every language is set (a null one would crash std::string)
     for (Language language : availableLanguages()) {
         const auto& t = getTranslations(language);
-        assert(t.code == languageCode(language) && t.languageAuto && t.displayName && t.ruleSaved);
+        assert(t.code == languageCode(language));
+        const std::vector<const char*> strings{
+            t.code, t.displayName, t.languageAuto, t.title, t.dashboardName, t.builtinPresets[0],
+            t.builtinPresets[1], t.builtinPresets[2], t.emptySlotSuffix, t.save, t.selectSlot, t.reset,
+            t.resetConfirm, t.panelBrightness, t.adjustmentChannel, t.channelNames[0], t.channelNames[1],
+            t.channelNames[2], t.channelNames[3], t.brightness, t.saturation, t.contrast, t.gamma, t.sharpness,
+            t.compare, t.compareHeld, t.autoCompare, t.autoCompareShowingOriginal, t.autoCompareShowingCorrected,
+            t.autoCompareOn, t.autoCompareOff, t.autoCompareEnded, t.sharpenCenter, t.sharpenWhole, t.autoPreset,
+            t.standalone, t.streaming, t.thisApp, t.autoOff, t.noApp, t.nowPrefix, t.autoApplied, t.autoRestored,
+            t.ruleSaved, t.errorSaveSettings, t.applied, t.errorSaveAdvanced, t.errorSavePreset, t.slotEmpty,
+            t.presetApplied, t.promptSaveSlot, t.saveCanceled, t.savedToSlotPrefix, t.savedToSlotSuffix};
+        for (const char* s : strings) assert(s != nullptr);
+        // The struct has no other members: a new field must be added to the list above
+        static_assert(sizeof(Translations) == 54 * sizeof(const char*), "update the string list");
     }
 
     // --- Screenshots ---
@@ -241,6 +328,26 @@ int main(int argc, char** argv) {
     render(fonts, shot, -1, -1, rgba, hits);
     writeRgba(outDir + "/panel_ko.rgba", rgba);
     shot.languageOpen = false;
+
+    // Korean, auto compare running and whole-image sharpening
+    shot.autoCompare = true;
+    shot.sharpenWhole = true;
+    shot.message = getTranslations(shot.language).autoCompareOn;
+    render(fonts, shot, -1, -1, rgba, hits);
+    writeRgba(outDir + "/panel_ko_auto.rgba", rgba);
+
+    // Japanese labels are the longest; check they fit (showing the original this time)
+    shot.language = Language::Japanese;
+    shot.autoOriginal = true;
+    shot.message = getTranslations(shot.language).autoCompareOn;
+    render(fonts, shot, -1, -1, rgba, hits);
+    writeRgba(outDir + "/panel_ja_auto.rgba", rgba);
+
+    // English has the longest auto compare message
+    shot.language = Language::English;
+    shot.message = getTranslations(shot.language).autoCompareOn;
+    render(fonts, shot, -1, -1, rgba, hits);
+    writeRgba(outDir + "/panel_en_auto.rgba", rgba);
 
     std::cout << "harness OK, panel " << kWidth << "x" << kHeight << "\n";
     return 0;

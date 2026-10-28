@@ -72,6 +72,59 @@ long readRssKb(const std::filesystem::path& procRoot, int pid) {
     return -1;
 }
 
+uint64_t drmMemoryKb(const std::string& value) {
+    // The kernel prints the size with the largest exact unit: none (bytes), KiB or MiB.
+    std::istringstream in(value);
+    uint64_t number = 0;
+    std::string unit;
+    if (!(in >> number)) return 0;
+    in >> unit;
+    if (unit == "KiB") return number;
+    if (unit == "MiB") return number * 1024;
+    if (unit == "GiB") return number * 1024 * 1024;
+    return number / 1024;
+}
+
+DrmGpuUsage readDrmGpuUsage(const std::filesystem::path& procRoot, int pid) {
+    DrmGpuUsage usage;
+    if (pid < 0) return usage;
+    std::vector<std::string> clients;  // a DRM client can be open on several fds
+    std::error_code ec;
+    for (std::filesystem::directory_iterator it(procRoot / std::to_string(pid) / "fdinfo", ec), end; !ec && it != end;
+         it.increment(ec)) {
+        std::ifstream in(it->path());
+        std::string line, client;
+        std::optional<uint64_t> engineNs;
+        uint64_t residentKb = 0;
+        while (std::getline(in, line)) {
+            const auto colon = line.find(':');
+            if (colon == std::string::npos) continue;
+            const std::string key = line.substr(0, colon);
+            const std::string rest = line.substr(colon + 1);
+            std::istringstream value(rest);
+            uint64_t number = 0;
+            if (key == "drm-client-id") value >> client;
+            else if (key == "drm-engine-gpu" && value >> number) engineNs = number;
+            else if (key == "drm-resident-memory") residentKb = drmMemoryKb(rest);
+        }
+        if (client.empty() || std::find(clients.begin(), clients.end(), client) != clients.end()) continue;
+        clients.push_back(client);
+        if (engineNs) usage.engineNs[client] = *engineNs;
+        usage.residentKb += residentKb;
+    }
+    return usage;
+}
+
+std::optional<uint64_t> drmEngineDeltaNs(const DrmGpuUsage& start, const DrmGpuUsage& end) {
+    std::optional<uint64_t> total;
+    for (const auto& [client, endNs] : end.engineNs) {
+        const auto before = start.engineNs.find(client);
+        if (before == start.engineNs.end() || endNs < before->second) continue;
+        total = total.value_or(0) + (endNs - before->second);
+    }
+    return total;
+}
+
 namespace {
 
 std::filesystem::path configDir() {
@@ -88,21 +141,32 @@ std::filesystem::path dataDir() {
     return std::filesystem::path(home != nullptr ? home : "/tmp") / ".local" / "share" / "framecolor";
 }
 
-// What FrameColor was doing during the run, so results can be compared.
-std::string settingsLine() {
-    const auto layer = dataDir() / "layer";
-    const char* layerState = std::filesystem::exists(layer / "vkBasalt.json") ? "enabled"
-        : std::filesystem::exists(layer / "vkBasalt.json.disabled") ? "disabled" : "not installed";
+std::vector<double> currentValues() {
     std::ifstream in(configDir() / "current.txt");
     std::vector<double> v;
     for (double x; in >> x;) v.push_back(x);
+    return v;
+}
+
+bool compareActive() {
+    const std::vector<double> v = currentValues();
+    return v.size() >= 14 && v[13] > 0.5;
+}
+
+// What FrameColor was doing during the run, so results can be compared.
+std::string settingsLine(bool compareSeen) {
+    const auto layer = dataDir() / "layer";
+    const char* layerState = std::filesystem::exists(layer / "vkBasalt.json") ? "enabled"
+        : std::filesystem::exists(layer / "vkBasalt.json.disabled") ? "disabled" : "not installed";
+    const std::vector<double> v = currentValues();
     const std::vector<double> neutral{0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1};
     bool colorNeutral = true;
     for (size_t i = 0; i < std::min(v.size(), neutral.size()); ++i) colorNeutral = colorNeutral && v[i] == neutral[i];
-    char text[160];
-    std::snprintf(text, sizeof(text), "Vulkan correction: %s | color: %s | sharpness: %.0f%%%s", layerState,
+    char text[200];
+    std::snprintf(text, sizeof(text), "Vulkan correction: %s | color: %s | sharpness: %.0f%% (%s)%s", layerState,
                   colorNeutral ? "neutral" : "adjusted", v.size() >= 13 ? v[12] * 100.0 : 0.0,
-                  v.size() >= 14 && v[13] > 0.5 ? " | COMPARE HELD (correction bypassed)" : "");
+                  v.size() >= 15 && v[14] > 0.5 ? "whole image" : "center",
+                  compareSeen ? " | COMPARE was on during the run (correction bypassed part of the time)" : "");
     return text;
 }
 
@@ -131,9 +195,13 @@ int runBench(double seconds) {
     std::printf("Measuring for %.0f s. Keep the headset on and the scene still; close the dashboard.\n", seconds);
     std::fflush(stdout);
     std::vector<FrameSample> samples;
+    const int compositorPid = findProcess("/proc", "vrcompositor");
+    const DrmGpuUsage gpuStart = readDrmGpuUsage("/proc", compositorPid);
     const auto start = std::chrono::steady_clock::now();
+    bool compareSeen = false;  // hold or auto compare switches the correction off part of the time
     // The compositor keeps a short history, so read it every 0.5 s.
     while (std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() < seconds) {
+        compareSeen = compareSeen || compareActive();
         vr::Compositor_FrameTiming timing[128];
         for (auto& t : timing) t.m_nSize = sizeof(vr::Compositor_FrameTiming);
         const uint32_t count = compositor->GetFrameTimings(timing, 128);
@@ -146,22 +214,37 @@ int runBench(double seconds) {
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
     }
+    const DrmGpuUsage gpuEnd = readDrmGpuUsage("/proc", compositorPid);
+    const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
     vr::VR_Shutdown();
 
     const BenchSummary s = summarize(samples);
     std::printf("\nFrameColor bench (%.0f s, %s)\n", seconds, isStreaming() ? "PC streaming" : "standalone");
-    std::printf("  %s\n", settingsLine().c_str());
+    std::printf("  %s\n", settingsLine(compareSeen || compareActive()).c_str());
     if (s.frames == 0) {
         std::printf("  No frame timing was returned. Is a scene running?\n");
         return 1;
     }
     std::printf("  frames                 %zu (%.1f Hz)\n", s.frames, s.refreshHz);
-    std::printf("  compositor GPU ms      p50 %.2f  p95 %.2f  max %.2f\n", s.gpuP50, s.gpuP95, s.gpuMax);
+    // The per-process time includes FrameColor's pass; SteamVR's compositor GPU time does not.
+    const std::optional<uint64_t> busy = drmEngineDeltaNs(gpuStart, gpuEnd);
+    if (busy && elapsed > 0.0 && s.refreshHz > 0.0) {
+        const double busyNs = static_cast<double>(*busy);
+        const double frames = elapsed * s.refreshHz;
+        std::printf("  vrcompositor GPU       %.2f ms/frame, %.1f%% busy (includes FrameColor)\n", busyNs / 1e6 / frames,
+                    100.0 * busyNs / 1e9 / elapsed);
+    } else {
+        std::printf("  vrcompositor GPU       not available (no drm-engine-gpu in vrcompositor's fdinfo)\n");
+    }
+    std::printf("  compositor GPU ms      p50 %.2f  p95 %.2f  max %.2f (SteamVR; excludes FrameColor)\n", s.gpuP50,
+                s.gpuP95, s.gpuMax);
     std::printf("  compositor CPU ms      p50 %.2f  p95 %.2f\n", s.cpuP50, s.cpuP95);
     std::printf("  dropped %u  mispresented %u  reprojected %u (%.1f%%)\n", s.dropped, s.mispresented, s.reprojected,
                 100.0 * s.reprojected / s.frames);
-    std::printf("Memory (GPU allocations may not be counted in RSS)\n");
-    printMemory("vrcompositor", findProcess("/proc", "vrcompositor"));
+    std::printf("Memory (RSS; GPU allocations may not be counted in it)\n");
+    printMemory("vrcompositor", compositorPid);
+    if (gpuEnd.residentKb > 0)
+        std::printf("  vrcompositor GPU mem   %.1f MiB resident (sum over DRM clients)\n", gpuEnd.residentKb / 1024.0);
     printMemory("framecolor dashboard", findProcess("/proc", "framecolor", static_cast<int>(getpid())));
     return 0;
 }

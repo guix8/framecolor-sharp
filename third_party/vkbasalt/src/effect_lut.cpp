@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <filesystem>
 #include <fstream>
 #include <cstdlib>
 
@@ -22,6 +23,13 @@
 
 namespace vkBasalt
 {
+    namespace
+    {
+        // How long a compare bypass in current.txt stays valid without a rewrite.
+        // The dashboard rewrites the file every second while it shows the original.
+        constexpr auto kBypassLease = std::chrono::seconds(5);
+    } // namespace
+
     LutEffect::LutEffect(LogicalDevice*       pLogicalDevice,
                          VkFormat             format,
                          VkExtent2D           imageExtent,
@@ -75,7 +83,7 @@ namespace vkBasalt
 
         lutDescriptorPool = createDescriptorPool(pLogicalDevice, poolSizes);
 
-        // The sharpen amount and the compare bypass live in mapped uniform
+        // The sharpen amount, the compare bypass and the sharpen area live in mapped uniform
         // buffers, so changes do not need new pipelines or command buffers.
         // Each swapchain image has its own buffer: prepareImage() rewrites a
         // buffer only when its image is presented again, so no queue wait is needed.
@@ -97,6 +105,7 @@ namespace vkBasalt
             ASSERT_VULKAN(result);
             paramSlots[i][0] = 0.0f;
             paramSlots[i][1] = 0.0f;
+            paramSlots[i][2] = 0.0f;
         }
 
         paramDescriptorSetLayout = createUniformBufferDescriptorSetLayout(pLogicalDevice);
@@ -162,9 +171,10 @@ namespace vkBasalt
             return;
         const char* xdgConfig = std::getenv("XDG_CONFIG_HOME");
         const std::string configRoot = xdgConfig && *xdgConfig ? xdgConfig : std::string(home) + "/.config";
-        std::ifstream valuesFile(configRoot + "/framecolor/current.txt");
-        std::array<float, 14> values{{0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f,
-                                      1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f}};
+        const std::string valuesPath = configRoot + "/framecolor/current.txt";
+        std::ifstream valuesFile(valuesPath);
+        std::array<float, 15> values{{0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f,
+                                      1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f}};
         std::vector<float> stored;
         for (float value; valuesFile >> value;)
             stored.push_back(value);
@@ -172,18 +182,39 @@ namespace vkBasalt
             return;
         for (size_t i = 0; i < std::min(stored.size(), values.size()); ++i)
             values[i] = stored[i];
-        // Older files have no gain, saturation, sharpen or bypass fields. The
+        // Older files have no gain, saturation, sharpen, bypass or sharpen area fields. The
         // ten-value file used one saturation setting for all three output channels.
         if (stored.size() == 10)
             values[10] = values[11] = values[9];
         if (!std::all_of(values.begin(), values.end(), [](float value) { return std::isfinite(value); }))
             return;
-        if (hasFrameColorValues && values == frameColorValues)
+        // A dashboard that stopped while compare was held leaves bypass at 1.
+        // Honour bypass only after this layer has seen it at 0 once, so that
+        // stale flag cannot hide the correction.
+        if (values[13] <= 0.5f)
+            bypassArmed = true;
+        // Bypass is also a lease: the dashboard rewrites current.txt every second
+        // while it shows the original image. If the file is not rewritten for
+        // kBypassLease (the dashboard hangs or a write fails), show the corrected
+        // image again.
+        bool bypassFresh = false;
+        if (values[13] > 0.5f)
+        {
+            std::error_code ec;
+            const auto written = std::filesystem::last_write_time(valuesPath, ec);
+            if (!ec)
+            {
+                const auto age = std::filesystem::file_time_type::clock::now() - written;
+                bypassFresh = age < kBypassLease && age > -kBypassLease;
+            }
+        }
+        const float bypass = bypassArmed && bypassFresh ? 1.0f : 0.0f;
+        if (hasFrameColorValues && values == frameColorValues && bypass == params[1])
             return;
         const bool lookChanged =
             !hasFrameColorValues || !std::equal(values.begin(), values.begin() + 12, frameColorValues.begin());
         const bool paramsChanged = !hasFrameColorValues || values[12] != frameColorValues[12]
-                                   || values[13] != frameColorValues[13];
+                                   || values[14] != frameColorValues[14] || bypass != params[1];
 
         std::vector<unsigned char> pixels;
         if (lookChanged)
@@ -243,14 +274,10 @@ namespace vkBasalt
         }
         if (paramsChanged)
         {
-            // A dashboard that stopped while compare was held leaves bypass at 1.
-            // Honour bypass only after this layer has seen it at 0 once, so that
-            // stale flag cannot hide the correction.
-            if (values[13] <= 0.5f)
-                bypassArmed = true;
-            params = {std::clamp(values[12], 0.0f, 1.0f), bypassArmed && values[13] > 0.5f ? 1.0f : 0.0f};
+            params = {std::clamp(values[12], 0.0f, 1.0f), bypass, values[14] > 0.5f ? 1.0f : 0.0f};
             std::fill(paramSlotStale.begin(), paramSlotStale.end(), true);
-            Logger::debug("FrameColor sharpen " + std::to_string(params[0]) + " bypass " + std::to_string(params[1]));
+            Logger::debug("FrameColor sharpen " + std::to_string(params[0]) + " bypass " + std::to_string(params[1])
+                          + " whole image " + std::to_string(params[2]));
         }
         frameColorValues = values;
         hasFrameColorValues = true;
@@ -264,6 +291,7 @@ namespace vkBasalt
             return;
         paramSlots[imageIndex][0] = params[0];
         paramSlots[imageIndex][1] = params[1];
+        paramSlots[imageIndex][2] = params[2];
         paramSlotStale[imageIndex] = false;
     }
 } // namespace vkBasalt

@@ -25,6 +25,8 @@ layout(set=2, binding=0) uniform FrameColorParams
     float sharpenAmount;
     // 1 while the dashboard's compare button is held: show the original image.
     float bypass;
+    // 0: sharpen around the centre of each eye; 1: sharpen the whole image.
+    float sharpenWhole;
 };
 
 //Only works with cubes not with cuboids
@@ -36,7 +38,7 @@ layout(location = 0) out vec4 fragColor;
 #define textureLod0Offset(img, coord, offset) textureLodOffset(img, coord, 0.0f, offset)
 #define textureLod0(img, coord) textureLod(img, coord, 0.0f)
 
-vec3 sharpen(vec3 e)
+vec3 sharpen(vec3 e, float amount)
 {
     // fetch a 3x3 neighborhood around the pixel 'e',
     //  a b c
@@ -72,7 +74,7 @@ vec3 sharpen(vec3 e)
     vec3 ampRGB = clamp((min(mnRGB,2.0-mxRGB) * rcpMxRGB),0,1);
 
     // Shaping amount of sharpening. CAS runs at sharpness 1.0 (peak 5.0);
-    // sharpenAmount blends it with the source so the slider starts at zero.
+    // amount blends it with the source so the slider starts at zero.
     ampRGB = inversesqrt(ampRGB);
     float peak = 5.0;
     vec3 wRGB = -vec3(1)/(ampRGB * peak);
@@ -85,7 +87,28 @@ vec3 sharpen(vec3 e)
     vec3 window = (b + d) + (f + h);
     vec3 outColor = clamp((window * wRGB + e) * rcpWeightRGB,0,1);
 
-    return mix(e, outColor, sharpenAmount);
+    return mix(e, outColor, amount);
+}
+
+// By default, sharpen only around the centre of each eye. vrcompositor presents both eyes side
+// by side after lens distortion (4320x2160 on the Steam Frame), and the lens edges are blurred
+// anyway, so CAS is skipped there. That halves its cost and avoids edge shimmer.
+// Distances are relative to half the eye's width: full strength inside centerInner, fading
+// out by centerOuter (about half of the eye's pixels get CAS).
+const float centerInner = 0.55;
+const float centerOuter = 0.80;
+
+float sharpenWeight()
+{
+    if (sharpenWhole > 0.5)
+        return 1.0;
+    vec2 size = vec2(textureSize(img, 0));
+    vec2 eye = textureCoord;
+    // Two square eyes side by side; any other shape is treated as one eye.
+    if (abs(size.x - 2.0 * size.y) < 2.0)
+        eye.x = fract(eye.x * 2.0);
+    float r = length(eye * 2.0 - 1.0);
+    return 1.0 - smoothstep(centerInner, centerOuter, r);
 }
 
 void main()
@@ -96,8 +119,9 @@ void main()
         fragColor = color;
         return;
     }
-    if (sharpenAmount > 0.0)
-        color.rgb = sharpen(color.rgb);
+    float amount = sharpenAmount > 0.0 ? sharpenAmount * sharpenWeight() : 0.0;
+    if (amount > 0.0)
+        color.rgb = sharpen(color.rgb, amount);
 
     //see https://developer.nvidia.com/gpugems/GPUGems2/gpugems2_chapter24.html
     vec3 scale = (vec3(lutSize) - 1.0) / vec3(lutSize);

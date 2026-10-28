@@ -105,12 +105,25 @@ class LutTests(unittest.TestCase):
                 [sys.executable, str(ROOT / "tools/generate_vulkan_lut.py"), str(values), str(plain), "3"],
                 check=True,
             )
-            values.write_text("0 0 0 1 1 1 1 1 1 1 1 1 0.6 1\n")
+            values.write_text("0 0 0 1 1 1 1 1 1 1 1 1 0.6 1 1\n")
             subprocess.run(
                 [sys.executable, str(ROOT / "tools/generate_vulkan_lut.py"), str(values), str(sharpened), "3"],
                 check=True,
             )
             self.assertEqual(plain.read_text(), sharpened.read_text())
+
+    def test_sharpen_area_must_be_zero_or_one(self):
+        with tempfile.TemporaryDirectory() as directory:
+            values = Path(directory) / "current.txt"
+            values.write_text("0 0 0 1 1 1 1 1 1 1 1 1 0.6 0 0.5\n")
+            result = subprocess.run(
+                [sys.executable, str(ROOT / "tools/generate_vulkan_lut.py"), str(values),
+                 str(Path(directory) / "out.cube"), "3"],
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("sharpen area", result.stderr)
 
     def test_sharpen_out_of_range_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:

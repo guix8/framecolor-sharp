@@ -3,6 +3,8 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -36,6 +38,28 @@ int findProcess(const std::filesystem::path& procRoot, const std::string& name, 
 
 /** VmRSS of a process in KiB, or -1. */
 long readRssKb(const std::filesystem::path& procRoot, int pid);
+
+/**
+ * GPU use of one process from the DRM fdinfo files in /proc/PID/fdinfo, summed over
+ * its DRM clients. Unlike the compositor GPU time from SteamVR, this includes work that
+ * a Vulkan layer adds inside the process, such as FrameColor's pass in vrcompositor.
+ */
+struct DrmGpuUsage {
+    std::map<std::string, uint64_t> engineNs;  ///< drm-engine-gpu busy time per drm-client-id, ns
+    uint64_t residentKb = 0;      ///< drm-resident-memory summed over clients, KiB (shared memory may count twice)
+};
+
+/** Read DrmGpuUsage for a process; each drm-client-id is counted once. */
+DrmGpuUsage readDrmGpuUsage(const std::filesystem::path& procRoot, int pid);
+
+/**
+ * GPU busy time between two readings, summed over the clients present in both, so a
+ * client that opens or closes during the run does not distort it. Empty if none are.
+ */
+std::optional<uint64_t> drmEngineDeltaNs(const DrmGpuUsage& start, const DrmGpuUsage& end);
+
+/** A DRM fdinfo memory value such as "880204 KiB", "10 MiB" or "4096" (bytes), in KiB. */
+uint64_t drmMemoryKb(const std::string& value);
 
 /** Run the benchmark for the given seconds and print the report. Returns the exit code. */
 int runBench(double seconds);

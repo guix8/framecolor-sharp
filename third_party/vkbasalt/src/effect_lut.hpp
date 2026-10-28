@@ -38,7 +38,7 @@ namespace vkBasalt
         VkDescriptorSetLayout lutDescriptorSetLayout;
         VkDescriptorPool      lutDescriptorPool;
         VkDescriptorSet       lutDescriptorSet;
-        // One {sharpen amount, bypass} uniform buffer per swapchain image.
+        // One {sharpen amount, bypass, sharpen whole image} uniform buffer per swapchain image.
         std::vector<VkBuffer>        paramBuffers;
         std::vector<VkDeviceMemory>  paramMemory;
         std::vector<float*>          paramSlots;
@@ -46,11 +46,11 @@ namespace vkBasalt
         std::vector<VkDescriptorSet> paramDescriptorSets;
         VkDescriptorSetLayout        paramDescriptorSetLayout;
         VkDescriptorPool             paramDescriptorPool;
-        std::array<float, 2>         params{};
+        std::array<float, 3>         params{};
         bool                         bypassArmed = false;
         uint32_t              lutSize = 0;
         bool                  hasFrameColorValues = false;
-        std::array<float, 14> frameColorValues{};
+        std::array<float, 15> frameColorValues{};
         std::chrono::steady_clock::time_point nextFrameColorCheck{};
     };
 } // namespace vkBasalt

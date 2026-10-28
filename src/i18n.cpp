@@ -38,6 +38,14 @@ Translations createEnglish() {
     t.sharpness = "Sharpness";
     t.compare = "Hold to Compare";
     t.compareHeld = "Original";
+    t.autoCompare = "Auto Compare";
+    t.autoCompareShowingOriginal = "Auto: Original";
+    t.autoCompareShowingCorrected = "Auto: Corrected";
+    t.autoCompareOn = "Auto compare: switches every 3 s for 60 s. Hide the dashboard to watch (not with this panel's X)";
+    t.autoCompareOff = "Auto compare off";
+    t.autoCompareEnded = "Auto compare finished";
+    t.sharpenCenter = "Center only";
+    t.sharpenWhole = "Whole image";
     t.autoPreset = "Auto Preset";
     t.standalone = "Standalone";
     t.streaming = "PC Streaming";
@@ -95,6 +103,14 @@ Translations createJapanese() {
     t.sharpness = "シャープネス";
     t.compare = "長押しで比較";
     t.compareHeld = "補正なし";
+    t.autoCompare = "自動比較";
+    t.autoCompareShowingOriginal = "自動：補正なし";
+    t.autoCompareShowingCorrected = "自動：補正あり";
+    t.autoCompareOn = "自動比較：3秒ごとに60秒間切り替えます．ダッシュボードを隠して確認してください（パネルの×は使わない）";
+    t.autoCompareOff = "自動比較をオフにしました";
+    t.autoCompareEnded = "自動比較が終わりました";
+    t.sharpenCenter = "中央のみ";
+    t.sharpenWhole = "画面全体";
     t.autoPreset = "自動プリセット";
     t.standalone = "単体";
     t.streaming = "PCストリーミング";
@@ -134,7 +150,7 @@ Translations createKorean() {
     t.dashboardName = "디스플레이";
 
     // Preset Buttons
-    t.builtinPresets = {"표준", "선명", "야간"};
+    t.builtinPresets = {"표준", "비비드", "야간"};
     t.emptySlotSuffix = " (비어 있음)";
     t.save = "저장";
     t.selectSlot = "저장할 슬롯 선택";
@@ -152,6 +168,14 @@ Translations createKorean() {
     t.sharpness = "선명도";
     t.compare = "길게 눌러 비교";
     t.compareHeld = "보정 없음";
+    t.autoCompare = "자동 비교";
+    t.autoCompareShowingOriginal = "자동: 원본";
+    t.autoCompareShowingCorrected = "자동: 보정";
+    t.autoCompareOn = "자동 비교: 60초 동안 3초마다 바뀝니다. 대시보드를 숨기고 확인하세요(패널의 X는 누르지 마세요)";
+    t.autoCompareOff = "자동 비교를 껐습니다";
+    t.autoCompareEnded = "자동 비교가 끝났습니다";
+    t.sharpenCenter = "중앙만";
+    t.sharpenWhole = "화면 전체";
     t.autoPreset = "자동 프리셋";
     t.standalone = "독립형";
     t.streaming = "PC 스트리밍";

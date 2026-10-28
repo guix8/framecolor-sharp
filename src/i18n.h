@@ -36,6 +36,14 @@ struct Translations {
     const char* sharpness;                      // Sharpness slider label
     const char* compare;                        // Compare button label (hold to see the original)
     const char* compareHeld;                    // Compare button label while held
+    const char* autoCompare;                    // Auto compare toggle label
+    const char* autoCompareShowingOriginal;     // Auto compare button while the original image is shown
+    const char* autoCompareShowingCorrected;    // Auto compare button while the corrected image is shown
+    const char* autoCompareOn;                  // Shown when auto compare starts (mentions 3 s and 60 s)
+    const char* autoCompareOff;                 // Shown when auto compare is turned off
+    const char* autoCompareEnded;               // Shown when auto compare stops by itself
+    const char* sharpenCenter;                  // Sharpen area button: centre of each eye
+    const char* sharpenWhole;                   // Sharpen area button: whole image
     const char* autoPreset;                     // Auto preset section header
     const char* standalone;                     // Standalone mode rule label
     const char* streaming;                      // PC streaming mode rule label

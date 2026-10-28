@@ -63,7 +63,14 @@ struct Values {
 struct Preset { Values values; bool valid = false; };
 
 enum class HitKind { Slider, ChannelMenu, ChannelChoice, Preset, SaveMode, Reset, LanguageMenu, LanguageChoice,
-                     Compare, AutoRule };
+                     Compare, AutoRule, AutoCompare, SharpenArea };
+
+// Auto compare switches between the original and the corrected image so that it can be
+// judged in a game with the dashboard closed. Short turns make small differences easier
+// to see and leave the scene less time to change; it stops by itself so the switching
+// cannot be left running. The translations mention both durations.
+constexpr auto kAutoCompareTurn = std::chrono::seconds(3);
+constexpr auto kAutoCompareLength = std::chrono::seconds(60);
 struct Hit { double x, y, w, h; HitKind kind; int arg; };
 
 struct UiState {
@@ -82,6 +89,14 @@ struct UiState {
     std::string message;
     bool messageIsError = false;
     bool compare = false;          // compare button held: the layer shows the original image
+    bool autoCompare = false;      // auto compare is running
+    bool autoOriginal = false;     // auto compare is showing the original image now
+    std::chrono::steady_clock::time_point autoCompareTurnEnd{}, autoCompareEnd{};
+    bool sharpenWhole = false;     // sharpen the whole image instead of the centre of each eye
+                                   // (a global setting like the language, not part of presets)
+    // Last successful write of current.txt. While the original image is shown the file is
+    // rewritten every second, because the layer drops a bypass that is not renewed (lease).
+    std::chrono::steady_clock::time_point lastSave{};
     AutoRules autoRules;
     DisplayContext context;
     bool contextKnown = false;
@@ -172,6 +187,14 @@ void loadAdvancedValues(Values& values) {
     values.contrast = average(values.channelContrast);
 }
 
+// The 15th value of current.txt: 1 sharpens the whole image, 0 (or missing) the centre of each eye.
+bool loadSharpenWhole() {
+    std::ifstream in(currentPath());
+    std::vector<double> stored;
+    for (double value; in >> value;) stored.push_back(value);
+    return stored.size() >= 15 && stored[14] > 0.5;
+}
+
 bool saveAdvancedValues(UiState& ui) {
     const auto path = currentPath();
     std::error_code ec;
@@ -190,7 +213,7 @@ bool saveAdvancedValues(UiState& ui) {
         << ui.values.red << ' ' << ui.values.green << ' ' << ui.values.blue << ' '
         << ui.values.saturation[0] << ' ' << ui.values.saturation[1] << ' '
         << ui.values.saturation[2] << ' ' << ui.values.sharpen << ' '
-        << (ui.compare ? 1 : 0) << '\n';
+        << (ui.compare || ui.autoOriginal ? 1 : 0) << ' ' << (ui.sharpenWhole ? 1 : 0) << '\n';
     out.close();
     if (out) std::filesystem::rename(temporary, path, ec);
     if (!out || ec) {
@@ -199,6 +222,23 @@ bool saveAdvancedValues(UiState& ui) {
         ui.messageIsError = true;
         return false;
     }
+    ui.lastSave = std::chrono::steady_clock::now();
+    return true;
+}
+
+// Advance auto compare to `now`. Returns true when current.txt needs to be written.
+bool tickAutoCompare(UiState& ui, std::chrono::steady_clock::time_point now) {
+    if (!ui.autoCompare) return false;
+    if (now >= ui.autoCompareEnd) {
+        ui.autoCompare = ui.autoOriginal = false;
+        ui.message = getTranslations(ui.language).autoCompareEnded;
+        ui.messageIsError = false;
+        return true;
+    }
+    if (now < ui.autoCompareTurnEnd) return false;
+    ui.autoOriginal = !ui.autoOriginal;
+    // From now, not from the missed deadline: after a stall this switches once, not in a burst.
+    ui.autoCompareTurnEnd = now + kAutoCompareTurn;
     return true;
 }
 
@@ -503,6 +543,11 @@ void render(const FontSet& fonts, const UiState& ui, double pointerX, double poi
            HitKind::LanguageMenu, 0, ui.languageOpen, true, pointerX, pointerY);
     button(p, hits, langBtnX - 15 - 220, langBtnY, 220, langBtnH, ui.compare ? tr.compareHeld : tr.compare,
            HitKind::Compare, 0, ui.compare, ui.vulkanLayerActive, pointerX, pointerY);
+    // While running, the auto compare button shows which image is on screen
+    const char* autoLabel = !ui.autoCompare ? tr.autoCompare
+                            : ui.autoOriginal ? tr.autoCompareShowingOriginal : tr.autoCompareShowingCorrected;
+    button(p, hits, langBtnX - 15 - 220 - 15 - 200, langBtnY, 200, langBtnH, autoLabel,
+           HitKind::AutoCompare, 0, ui.autoCompare, ui.vulkanLayerActive, pointerX, pointerY);
 
     const std::array<std::string, 6> names{{
         tr.builtinPresets[0],
@@ -536,6 +581,9 @@ void render(const FontSet& fonts, const UiState& ui, double pointerX, double poi
     slider(p, hits, 590, tr.gamma,
            selectedArrayValue(ui.values.gamma, ui.channel), 0.50, 2.50, 3, ui.vulkanLayerActive);
     slider(p, hits, 680, tr.sharpness, ui.values.sharpen, 0.0, 1.0, 5, ui.vulkanLayerActive);
+    // Sharpen area, between the title and the track (the track's hit area starts at kTrackX - 20)
+    button(p, hits, 232, 697, 148, 44, ui.sharpenWhole ? tr.sharpenWhole : tr.sharpenCenter,
+           HitKind::SharpenArea, 0, false, ui.vulkanLayerActive, pointerX, pointerY);
 
     p.text(45, 806, tr.autoPreset, 22, kText, true);
     std::string now = std::string(tr.nowPrefix) + (ui.context.streaming ? tr.streaming : tr.standalone) + " · "
@@ -671,6 +719,30 @@ void activate(const Hit& hit, double x, UiState& ui, VrOverlay& overlay) {
             ui.resetConfirm = false;
             saveAdvancedValues(ui);
             break;
+        case HitKind::AutoCompare: {
+            ui.channelOpen = false;
+            ui.languageOpen = false;
+            ui.resetConfirm = false;
+            ui.saveMode = false;
+            ui.autoCompare = !ui.autoCompare;
+            // Start with the original image so the first switch shows up at once.
+            ui.autoOriginal = ui.autoCompare;
+            const auto now = std::chrono::steady_clock::now();
+            ui.autoCompareTurnEnd = now + kAutoCompareTurn;
+            ui.autoCompareEnd = now + kAutoCompareLength;
+            ui.message = ui.autoCompare ? tr.autoCompareOn : tr.autoCompareOff;
+            ui.messageIsError = false;
+            saveAdvancedValues(ui);
+            break;
+        }
+        case HitKind::SharpenArea:
+            ui.channelOpen = false;
+            ui.languageOpen = false;
+            ui.resetConfirm = false;
+            ui.saveMode = false;
+            ui.sharpenWhole = !ui.sharpenWhole;
+            saveAdvancedValues(ui);
+            break;
         case HitKind::AutoRule:
             ui.channelOpen = false;
             ui.languageOpen = false;
@@ -718,6 +790,7 @@ int main(int argc, char** argv) {
     ui.languageAuto = languageIsAuto(presetPath().parent_path());
     overlay.setOverlayName(getTranslations(ui.language).dashboardName);
     readValues(ui.values); loadAdvancedValues(ui.values); loadCustomPresets(ui);
+    ui.sharpenWhole = loadSharpenWhole();
     ui.autoRules = loadAutoRules(autoPath());
     const char* dataHome = std::getenv("XDG_DATA_HOME");
     const char* home = std::getenv("HOME");
@@ -764,11 +837,19 @@ int main(int argc, char** argv) {
                 lastLookSave = now;
             }
         }
+        // Auto compare keeps switching while the dashboard is hidden, which is the point of it.
+        if (tickAutoCompare(ui, now)) {
+            saveAdvancedValues(ui);
+            dirty = true;
+        } else if ((ui.compare || ui.autoOriginal) && now - ui.lastSave >= std::chrono::seconds(1)) {
+            // Renew the bypass lease (see UiState::lastSave).
+            saveAdvancedValues(ui);
+        }
         // Follow the display mode and the scene app once a second. Wait while the
-        // user drags a slider, holds compare or picks a save slot, so an auto
-        // preset never fights them. A new context must be seen twice in a row,
-        // so a short gap while an app starts does not flip presets.
-        if (now >= nextContextCheck && ui.activeSlider < 0 && !ui.compare && !ui.saveMode) {
+        // user drags a slider, holds compare, runs auto compare or picks a save slot,
+        // so an auto preset never fights them. A new context must be seen twice in a
+        // row, so a short gap while an app starts does not flip presets.
+        if (now >= nextContextCheck && ui.activeSlider < 0 && !ui.compare && !ui.autoCompare && !ui.saveMode) {
             nextContextCheck = now + std::chrono::seconds(1);
             DisplayContext context{isStreaming(), currentAppKey()};
             if (ui.contextKnown && context == ui.context) {
@@ -798,7 +879,10 @@ int main(int argc, char** argv) {
         wasVisible = visible;
         std::this_thread::sleep_for(std::chrono::milliseconds(visible ? 33 : 250));
     }
-    if (ui.compare) { ui.compare = false; saveAdvancedValues(ui); }
+    if (ui.compare || ui.autoOriginal) {
+        ui.compare = ui.autoCompare = ui.autoOriginal = false;
+        saveAdvancedValues(ui);
+    }
     overlay.shutdown();
     return 0;
 }
