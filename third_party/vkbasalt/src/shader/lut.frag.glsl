@@ -19,10 +19,12 @@
 
 layout(set=0, binding=0) uniform sampler2D img;
 layout(set=1, binding=0) uniform sampler3D lut;
-layout(set=2, binding=0) uniform SharpenParams
+layout(set=2, binding=0) uniform FrameColorParams
 {
     // 0 disables sharpening; 1 is CAS at its strongest setting.
     float sharpenAmount;
+    // 1 while the dashboard's compare button is held: show the original image.
+    float bypass;
 };
 
 //Only works with cubes not with cuboids
@@ -89,6 +91,11 @@ vec3 sharpen(vec3 e)
 void main()
 {
     vec4 color = textureLod0(img,textureCoord);
+    if (bypass > 0.5)
+    {
+        fragColor = color;
+        return;
+    }
     if (sharpenAmount > 0.0)
         color.rgb = sharpen(color.rgb);
 

@@ -34,6 +34,16 @@ Translations createEnglish() {
     t.contrast = "Contrast";
     t.gamma = "Gamma";
     t.sharpness = "Sharpness";
+    t.compare = "Hold to Compare";
+    t.compareHeld = "Original";
+    t.autoPreset = "Auto Preset";
+    t.standalone = "Standalone";
+    t.streaming = "PC Streaming";
+    t.thisApp = "This App";
+    t.autoOff = "Off";
+    t.noApp = "no app";
+    t.nowPrefix = "Now: ";
+    t.autoApplied = "Auto preset: ";
 
     // Status & Feedback Messages
     t.errorSaveSettings = "Failed to save settings: ";
@@ -78,6 +88,16 @@ Translations createJapanese() {
     t.contrast = "コントラスト";
     t.gamma = "ガンマ";
     t.sharpness = "シャープネス";
+    t.compare = "長押しで比較";
+    t.compareHeld = "補正なし";
+    t.autoPreset = "自動プリセット";
+    t.standalone = "単体";
+    t.streaming = "PCストリーミング";
+    t.thisApp = "このアプリ";
+    t.autoOff = "オフ";
+    t.noApp = "アプリなし";
+    t.nowPrefix = "現在: ";
+    t.autoApplied = "自動プリセット: ";
 
     // Status & Feedback Messages
     t.errorSaveSettings = "設定の保存に失敗: ";

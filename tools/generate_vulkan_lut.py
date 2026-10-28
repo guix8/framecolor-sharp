@@ -48,10 +48,12 @@ def main() -> None:
         raise SystemExit("saturation must contain one legacy value or three channel values")
     if any(not 0.0 <= value <= 2.0 for value in values[9:12]):
         raise SystemExit("saturation must be in 0.0..2.0")
-    # The 13th value is the sharpen amount. The Vulkan layer applies it in
-    # the shader, so it does not change the LUT.
+    # The 13th value is the sharpen amount and the 14th is the compare bypass.
+    # The Vulkan layer applies both in the shader, so they do not change the LUT.
     if any(not 0.0 <= value <= 1.0 for value in values[12:13]):
         raise SystemExit("sharpen must be in 0.0..1.0")
+    if any(value not in (0.0, 1.0) for value in values[13:14]):
+        raise SystemExit("bypass must be 0 or 1")
     size = int(sys.argv[3]) if len(sys.argv) == 4 else 33
     if not 2 <= size <= 65:
         raise SystemExit("LUT size must be between 2 and 65")

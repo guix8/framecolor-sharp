@@ -81,6 +81,16 @@ You can switch the interface language between English and Japanese using the lan
 
 Under Adjustment Channel, choose All, Red, Green, or Blue. Moving a control with All selected changes the current values of all three channels together. Panel brightness and sharpness are unaffected by the channel selection. To save the current settings, select Save and then P1, P2, or P3. Reset applies the Standard preset.
 
+Hold **Hold to Compare** to see the image without FrameColor's correction. Release it to return to your settings.
+
+**Auto Preset** applies a preset when the display mode or the app changes. Press a button to step through Off, Standard, Vivid, Night, and your saved P1–P3:
+
+- **Standalone**: used while no PC stream runs.
+- **PC Streaming**: used while `vrlink` runs (a PC stream is active).
+- **This App**: used while the current SteamVR scene app runs. It wins over the mode rules. It is unavailable when the app has no SteamVR app key.
+
+FrameColor checks the mode and the app once per second. Your manual changes stay until the mode or the app changes again. Rules are saved in `~/.config/framecolor/auto.txt`.
+
 You can also use these commands over SSH:
 
 ```sh

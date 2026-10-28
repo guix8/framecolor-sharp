@@ -62,7 +62,7 @@ install -d -m 700 "$fc_config_dir"
 install -d -m 755 "$fc_data_dir/layer"
 
 if [ ! -f "$fc_config_dir/current.txt" ]; then
-    printf '0 0 0 1 1 1 1 1 1 1 1 1 0\n' > "$fc_config_dir/current.txt"
+    printf '0 0 0 1 1 1 1 1 1 1 1 1 0 0\n' > "$fc_config_dir/current.txt"
 fi
 python3 "$fc_source_dir/tools/generate_vulkan_lut.py" "$fc_config_dir/current.txt" "$fc_data_dir/framecolor.cube"
 

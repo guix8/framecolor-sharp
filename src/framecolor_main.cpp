@@ -1,3 +1,4 @@
+#include "auto_profile.h"
 #include "draw.h"
 #include "i18n.h"
 #include "openvr.h"
@@ -23,7 +24,7 @@
 namespace {
 
 constexpr int kWidth = 1200;
-constexpr int kHeight = 790;
+constexpr int kHeight = 920;
 constexpr int kThumb = 256;
 constexpr const char* kFont = "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc";
 constexpr const char* kBold = "/usr/share/fonts/noto-cjk/NotoSansCJK-Bold.ttc";
@@ -59,7 +60,8 @@ struct Values {
 
 struct Preset { Values values; bool valid = false; };
 
-enum class HitKind { Slider, ChannelMenu, ChannelChoice, Preset, SaveMode, Reset, LanguageMenu, LanguageChoice };
+enum class HitKind { Slider, ChannelMenu, ChannelChoice, Preset, SaveMode, Reset, LanguageMenu, LanguageChoice,
+                     Compare, AutoRule };
 struct Hit { double x, y, w, h; HitKind kind; int arg; };
 
 struct UiState {
@@ -76,6 +78,11 @@ struct UiState {
     bool vulkanLayerActive = false;
     std::string message;
     bool messageIsError = false;
+    bool compare = false;          // compare button held: the layer shows the original image
+    AutoRules autoRules;
+    DisplayContext context;
+    bool contextKnown = false;
+    std::string appName;
 };
 
 const std::array<Preset, 3> kBuiltins{{
@@ -123,6 +130,7 @@ std::filesystem::path presetPath() {
 }
 
 std::filesystem::path currentPath() { return presetPath().parent_path() / "current.txt"; }
+std::filesystem::path autoPath() { return presetPath().parent_path() / "auto.txt"; }
 
 void neutralizeLegacyStreamGains(UiState& ui) {
     // Earlier releases wrote these stream-only gains. Leave them neutral so
@@ -175,7 +183,8 @@ bool saveAdvancedValues(UiState& ui) {
         << ui.values.gamma[0] << ' ' << ui.values.gamma[1] << ' ' << ui.values.gamma[2] << ' '
         << ui.values.red << ' ' << ui.values.green << ' ' << ui.values.blue << ' '
         << ui.values.saturation[0] << ' ' << ui.values.saturation[1] << ' '
-        << ui.values.saturation[2] << ' ' << ui.values.sharpen << '\n';
+        << ui.values.saturation[2] << ' ' << ui.values.sharpen << ' '
+        << (ui.compare ? 1 : 0) << '\n';
     out.close();
     std::filesystem::rename(temporary, path, ec);
     if (ec) {
@@ -260,6 +269,85 @@ void applyPreset(const Preset& preset, UiState& ui) {
     saveAdvancedValues(ui);
     readValues(ui.values);
     if (!ui.messageIsError) ui.message.clear();
+}
+
+std::string presetName(int index, const Translations& tr) {
+    if (index < 0) return tr.autoOff;
+    if (index < 3) return tr.builtinPresets[index];
+    return "P" + std::to_string(index - 2);
+}
+
+const Preset& presetAt(const UiState& ui, int index) {
+    return index < 3 ? kBuiltins[index] : ui.custom[index - 3];
+}
+
+// Which rule decides the preset now: 0=standalone, 1=streaming, 2=this app.
+int governingRule(const UiState& ui) {
+    if (!ui.context.appKey.empty() && ui.autoRules.apps.count(ui.context.appKey)) return 2;
+    return ui.context.streaming ? 1 : 0;
+}
+
+void applyAutoPreset(UiState& ui) {
+    const int index = resolveAutoPreset(ui.autoRules, ui.context);
+    if (index < 0 || !presetAt(ui, index).valid) return;
+    applyPreset(presetAt(ui, index), ui);
+    if (ui.messageIsError) return;
+    const auto& tr = getTranslations(ui.language);
+    ui.message = std::string(tr.autoApplied) + presetName(index, tr);
+}
+
+int ruleValue(const UiState& ui, int rule) {
+    if (rule == 0) return ui.autoRules.standalone;
+    if (rule == 1) return ui.autoRules.streaming;
+    const auto it = ui.autoRules.apps.find(ui.context.appKey);
+    return it == ui.autoRules.apps.end() ? -1 : it->second;
+}
+
+void cycleRule(UiState& ui, int rule) {
+    const bool valid[3] = {ui.custom[0].valid, ui.custom[1].valid, ui.custom[2].valid};
+    const int next = nextPresetChoice(ruleValue(ui, rule), valid);
+    if (rule == 0) ui.autoRules.standalone = next;
+    else if (rule == 1) ui.autoRules.streaming = next;
+    else if (next < 0) ui.autoRules.apps.erase(ui.context.appKey);
+    else ui.autoRules.apps[ui.context.appKey] = next;
+    if (!saveAutoRules(autoPath(), ui.autoRules)) {
+        ui.message = getTranslations(ui.language).errorSavePreset;
+        ui.messageIsError = true;
+        return;
+    }
+    if (ui.contextKnown && governingRule(ui) == rule) applyAutoPreset(ui);
+}
+
+// OpenVR: the app key of the process that owns the scene, or "" if it has none.
+std::string currentAppKey() {
+    vr::IVRCompositor* compositor = vr::VRCompositor();
+    vr::IVRApplications* applications = vr::VRApplications();
+    if (compositor == nullptr || applications == nullptr) return {};
+    const uint32_t pid = compositor->GetCurrentSceneFocusProcess();
+    if (pid == 0) return {};
+    char key[vr::k_unMaxApplicationKeyLength] = {};
+    if (applications->GetApplicationKeyByProcessId(pid, key, sizeof(key)) != vr::VRApplicationError_None) return {};
+    return key;
+}
+
+std::string appDisplayName(const std::string& key) {
+    if (key.empty() || vr::VRApplications() == nullptr) return {};
+    char name[256] = {};
+    vr::EVRApplicationError error = vr::VRApplicationError_None;
+    vr::VRApplications()->GetApplicationPropertyString(key.c_str(), vr::VRApplicationProperty_Name_String, name,
+                                                       sizeof(name), &error);
+    return error == vr::VRApplicationError_None && name[0] != '\0' ? name : key;
+}
+
+// Shorten a UTF-8 string with an ellipsis until it fits maxWidth.
+std::string fitText(const Pen& p, std::string text, double size, bool bold, double maxWidth) {
+    if (p.measure(text, size, bold) <= maxWidth) return text;
+    while (!text.empty() && p.measure(text + "…", size, bold) > maxWidth) {
+        text.pop_back();
+        while (!text.empty() && (static_cast<unsigned char>(text.back()) & 0xC0) == 0x80) text.pop_back();
+        if (!text.empty() && (static_cast<unsigned char>(text.back()) & 0xC0) == 0xC0) text.pop_back();
+    }
+    return text + "…";
 }
 
 void fillRect(const Pen& p, double x, double y, double w, double h, Color c, double radius = 12) {
@@ -390,6 +478,8 @@ void render(const FontSet& fonts, const UiState& ui, double pointerX, double poi
     const std::string langLabel = std::string(tr.displayName) + "    v";
     button(p, hits, langBtnX, langBtnY, langBtnW, langBtnH, langLabel,
            HitKind::LanguageMenu, 0, ui.languageOpen, true, pointerX, pointerY);
+    button(p, hits, langBtnX - 15 - 220, langBtnY, 220, langBtnH, ui.compare ? tr.compareHeld : tr.compare,
+           HitKind::Compare, 0, ui.compare, ui.vulkanLayerActive, pointerX, pointerY);
 
     const std::array<std::string, 6> names{{
         tr.builtinPresets[0],
@@ -424,8 +514,20 @@ void render(const FontSet& fonts, const UiState& ui, double pointerX, double poi
            selectedArrayValue(ui.values.gamma, ui.channel), 0.50, 2.50, 3, ui.vulkanLayerActive);
     slider(p, hits, 680, tr.sharpness, ui.values.sharpen, 0.0, 1.0, 5, ui.vulkanLayerActive);
 
+    p.text(45, 806, tr.autoPreset, 22, kText, true);
+    std::string now = std::string(tr.nowPrefix) + (ui.context.streaming ? tr.streaming : tr.standalone) + " · "
+                      + (ui.appName.empty() ? tr.noApp : ui.appName);
+    p.text(1155, 806, fitText(p, now, 20, false, 760), 20, kMuted, false, true);
+    const std::array<std::string, 3> ruleNames{{tr.standalone, tr.streaming, tr.thisApp}};
+    for (int rule = 0; rule < 3; ++rule) {
+        const bool usable = rule < 2 || !ui.context.appKey.empty();
+        const std::string value = rule < 2 || usable ? presetName(ruleValue(ui, rule), tr) : std::string("-");
+        button(p, hits, 45 + rule * 375, 822, 360, 54, ruleNames[rule] + ": " + value, HitKind::AutoRule, rule,
+               ui.contextKnown && governingRule(ui) == rule && ruleValue(ui, rule) >= 0, usable, pointerX, pointerY);
+    }
+
     if (!ui.message.empty()) {
-        p.text(45, 770, ui.message, 20, ui.messageIsError ? kRed : kGreen);
+        p.text(45, 905, ui.message, 20, ui.messageIsError ? kRed : kGreen);
     }
 
     // Dropdown popups are rendered last so they appear on top and hit-test first
@@ -532,6 +634,20 @@ void activate(const Hit& hit, double x, UiState& ui, VrOverlay& overlay) {
             ui.channelOpen = false;
             ui.languageOpen = false;
             break;
+        case HitKind::Compare:
+            ui.compare = true;
+            ui.channelOpen = false;
+            ui.languageOpen = false;
+            ui.resetConfirm = false;
+            saveAdvancedValues(ui);
+            break;
+        case HitKind::AutoRule:
+            ui.channelOpen = false;
+            ui.languageOpen = false;
+            ui.resetConfirm = false;
+            ui.saveMode = false;
+            cycleRule(ui, hit.arg);
+            break;
         case HitKind::Reset:
             if (!ui.resetConfirm) {
                 ui.resetConfirm = true;
@@ -567,6 +683,7 @@ int main() {
     ui.language = loadSavedLanguage(presetPath().parent_path());
     overlay.setOverlayName(getTranslations(ui.language).dashboardName);
     readValues(ui.values); loadAdvancedValues(ui.values); loadCustomPresets(ui);
+    ui.autoRules = loadAutoRules(autoPath());
     const char* dataHome = std::getenv("XDG_DATA_HOME");
     const char* home = std::getenv("HOME");
     const std::filesystem::path dataRoot = dataHome && *dataHome ? dataHome :
@@ -574,7 +691,10 @@ int main() {
     ui.vulkanLayerActive = std::filesystem::exists(dataRoot / "framecolor/layer/vkBasalt.json");
     setSetting("contrast", 0.0, ui);
     neutralizeLegacyStreamGains(ui);
+    // Clear a compare bypass left behind if the dashboard stopped while it was held.
+    if (ui.vulkanLayerActive) saveAdvancedValues(ui);
     auto lastLookSave = std::chrono::steady_clock::now();
+    auto nextContextCheck = lastLookSave;
     std::vector<Hit> hits; double px = -1, py = -1; bool dirty = true; bool wasVisible = false;
     while (!gStop && overlay.steamVrAlive()) {
         const VrEvents events = overlay.pollEvents();
@@ -586,6 +706,7 @@ int main() {
                 dirty = true;
             } else if (e.type == PointerInput::Type::Leave) {
                 px = py = -1; ui.activeSlider = -1; dirty = true;
+                if (ui.compare) { ui.compare = false; saveAdvancedValues(ui); }
             } else if (e.type == PointerInput::Type::Down) {
                 if (const Hit* hit = hitTest(hits, e.x, e.y)) activate(*hit, e.x, ui, overlay);
                 else {
@@ -595,7 +716,7 @@ int main() {
                 }
                 dirty = true;
             } else if (e.type == PointerInput::Type::Up) {
-                ui.activeSlider = -1; readValues(ui.values);
+                ui.activeSlider = -1; ui.compare = false; readValues(ui.values);
                 if (saveAdvancedValues(ui)) ui.lookDirty = false;
                 dirty = true;
             }
@@ -608,7 +729,21 @@ int main() {
                 lastLookSave = now;
             }
         }
+        // Follow the display mode and the scene app once a second. Wait while the
+        // user drags a slider or holds compare, so an auto preset never fights them.
+        if (now >= nextContextCheck && ui.activeSlider < 0 && !ui.compare) {
+            nextContextCheck = now + std::chrono::seconds(1);
+            DisplayContext context{isStreaming(), currentAppKey()};
+            if (!ui.contextKnown || context != ui.context) {
+                ui.context = context;
+                ui.contextKnown = true;
+                ui.appName = appDisplayName(context.appKey);
+                applyAutoPreset(ui);
+                dirty = true;
+            }
+        }
         const bool visible = overlay.panelVisible();
+        if (!visible && ui.compare) { ui.compare = false; saveAdvancedValues(ui); }
         if (visible && (!wasVisible || dirty)) {
             render(fonts, ui, px, py, pixels, hits); overlay.submitPanel(pixels.data()); dirty = false;
         }

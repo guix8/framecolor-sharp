@@ -32,6 +32,16 @@ struct Translations {
     const char* contrast;                       // Contrast slider label
     const char* gamma;                          // Gamma slider label
     const char* sharpness;                      // Sharpness slider label
+    const char* compare;                        // Compare button label (hold to see the original)
+    const char* compareHeld;                    // Compare button label while held
+    const char* autoPreset;                     // Auto preset section header
+    const char* standalone;                     // Standalone mode rule label
+    const char* streaming;                      // PC streaming mode rule label
+    const char* thisApp;                        // Current app rule label
+    const char* autoOff;                        // Rule value when no preset is set
+    const char* noApp;                          // Shown when no app is detected
+    const char* nowPrefix;                      // Prefix for the current display context
+    const char* autoApplied;                    // Prefix for the auto preset message
 
     const char* errorSaveSettings;  // Error prefix when saving SteamVR analogGain setting fails
     const char* applied;            // Success message when a setting is applied

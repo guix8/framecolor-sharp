@@ -75,8 +75,8 @@ namespace vkBasalt
 
         lutDescriptorPool = createDescriptorPool(pLogicalDevice, poolSizes);
 
-        // The sharpen amount lives in a mapped uniform buffer, so slider
-        // changes do not need new pipelines or re-recorded command buffers.
+        // The sharpen amount and the compare bypass live in a mapped uniform
+        // buffer, so changes do not need new pipelines or command buffers.
         createBuffer(pLogicalDevice,
                      sizeof(float) * 4,
                      VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
@@ -84,9 +84,10 @@ namespace vkBasalt
                      sharpenBuffer,
                      sharpenMemory);
         VkResult result = pLogicalDevice->vkd.MapMemory(
-            pLogicalDevice->device, sharpenMemory, 0, VK_WHOLE_SIZE, 0, reinterpret_cast<void**>(&pSharpenAmount));
+            pLogicalDevice->device, sharpenMemory, 0, VK_WHOLE_SIZE, 0, reinterpret_cast<void**>(&pParams));
         ASSERT_VULKAN(result);
-        *pSharpenAmount = 0.0f;
+        pParams[0] = 0.0f;
+        pParams[1] = 0.0f;
 
         sharpenDescriptorSetLayout = createUniformBufferDescriptorSetLayout(pLogicalDevice);
         descriptorSetLayouts.push_back(sharpenDescriptorSetLayout);
@@ -147,8 +148,8 @@ namespace vkBasalt
         const char* xdgConfig = std::getenv("XDG_CONFIG_HOME");
         const std::string configRoot = xdgConfig && *xdgConfig ? xdgConfig : std::string(home) + "/.config";
         std::ifstream valuesFile(configRoot + "/framecolor/current.txt");
-        std::array<float, 13> values{{0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f,
-                                      1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.0f}};
+        std::array<float, 14> values{{0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f,
+                                      1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f}};
         std::vector<float> stored;
         for (float value; valuesFile >> value;)
             stored.push_back(value);
@@ -156,8 +157,8 @@ namespace vkBasalt
             return;
         for (size_t i = 0; i < std::min(stored.size(), values.size()); ++i)
             values[i] = stored[i];
-        // Older files have no gain, saturation or sharpen fields. The ten-value
-        // file used one saturation setting for all three output channels.
+        // Older files have no gain, saturation, sharpen or bypass fields. The
+        // ten-value file used one saturation setting for all three output channels.
         if (stored.size() == 10)
             values[10] = values[11] = values[9];
         if (!std::all_of(values.begin(), values.end(), [](float value) { return std::isfinite(value); }))
@@ -166,7 +167,8 @@ namespace vkBasalt
             return;
         const bool lookChanged =
             !hasFrameColorValues || !std::equal(values.begin(), values.begin() + 12, frameColorValues.begin());
-        const bool sharpenChanged = !hasFrameColorValues || values[12] != frameColorValues[12];
+        const bool paramsChanged = !hasFrameColorValues || values[12] != frameColorValues[12]
+                                   || values[13] != frameColorValues[13];
 
         std::vector<unsigned char> pixels;
         if (lookChanged)
@@ -224,10 +226,11 @@ namespace vkBasalt
                           pixels.data(), 1, true);
             Logger::info("FrameColor live LUT updated");
         }
-        if (sharpenChanged)
+        if (paramsChanged)
         {
-            *pSharpenAmount = std::clamp(values[12], 0.0f, 1.0f);
-            Logger::info("FrameColor sharpen amount " + std::to_string(*pSharpenAmount));
+            pParams[0] = std::clamp(values[12], 0.0f, 1.0f);
+            pParams[1] = values[13] > 0.5f ? 1.0f : 0.0f;
+            Logger::info("FrameColor sharpen " + std::to_string(pParams[0]) + " bypass " + std::to_string(pParams[1]));
         }
         frameColorValues = values;
         hasFrameColorValues = true;

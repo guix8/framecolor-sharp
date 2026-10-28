@@ -95,7 +95,7 @@ class LutTests(unittest.TestCase):
             rows = [line for line in output.read_text().splitlines() if line and line[0].isdigit()]
             self.assertEqual(rows[1], "0.1063000 0.0000000 0.0000000")
 
-    def test_sharpen_value_does_not_change_cube(self):
+    def test_sharpen_and_bypass_values_do_not_change_cube(self):
         with tempfile.TemporaryDirectory() as directory:
             values = Path(directory) / "current.txt"
             plain = Path(directory) / "plain.cube"
@@ -105,7 +105,7 @@ class LutTests(unittest.TestCase):
                 [sys.executable, str(ROOT / "tools/generate_vulkan_lut.py"), str(values), str(plain), "3"],
                 check=True,
             )
-            values.write_text("0 0 0 1 1 1 1 1 1 1 1 1 0.6\n")
+            values.write_text("0 0 0 1 1 1 1 1 1 1 1 1 0.6 1\n")
             subprocess.run(
                 [sys.executable, str(ROOT / "tools/generate_vulkan_lut.py"), str(values), str(sharpened), "3"],
                 check=True,
