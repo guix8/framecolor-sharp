@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <filesystem>
 #include <fstream>
 #include <cstdlib>
 
@@ -23,13 +22,6 @@
 
 namespace vkBasalt
 {
-    namespace
-    {
-        // How long a compare bypass in current.txt stays valid without a rewrite.
-        // The dashboard rewrites the file every second while it shows the original.
-        constexpr auto kBypassLease = std::chrono::seconds(5);
-    } // namespace
-
     LutEffect::LutEffect(LogicalDevice*       pLogicalDevice,
                          VkFormat             format,
                          VkExtent2D           imageExtent,
@@ -171,8 +163,7 @@ namespace vkBasalt
             return;
         const char* xdgConfig = std::getenv("XDG_CONFIG_HOME");
         const std::string configRoot = xdgConfig && *xdgConfig ? xdgConfig : std::string(home) + "/.config";
-        const std::string valuesPath = configRoot + "/framecolor/current.txt";
-        std::ifstream valuesFile(valuesPath);
+        std::ifstream valuesFile(configRoot + "/framecolor/current.txt");
         std::array<float, 15> values{{0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f,
                                       1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f}};
         std::vector<float> stored;
@@ -193,22 +184,7 @@ namespace vkBasalt
         // stale flag cannot hide the correction.
         if (values[13] <= 0.5f)
             bypassArmed = true;
-        // Bypass is also a lease: the dashboard rewrites current.txt every second
-        // while it shows the original image. If the file is not rewritten for
-        // kBypassLease (the dashboard hangs or a write fails), show the corrected
-        // image again.
-        bool bypassFresh = false;
-        if (values[13] > 0.5f)
-        {
-            std::error_code ec;
-            const auto written = std::filesystem::last_write_time(valuesPath, ec);
-            if (!ec)
-            {
-                const auto age = std::filesystem::file_time_type::clock::now() - written;
-                bypassFresh = age < kBypassLease && age > -kBypassLease;
-            }
-        }
-        const float bypass = bypassArmed && bypassFresh ? 1.0f : 0.0f;
+        const float bypass = bypassArmed && values[13] > 0.5f ? 1.0f : 0.0f;
         if (hasFrameColorValues && values == frameColorValues && bypass == params[1])
             return;
         const bool lookChanged =

@@ -94,9 +94,6 @@ struct UiState {
     std::chrono::steady_clock::time_point autoCompareTurnEnd{}, autoCompareEnd{};
     bool sharpenWhole = false;     // sharpen the whole image instead of the centre of each eye
                                    // (a global setting like the language, not part of presets)
-    // Last successful write of current.txt. While the original image is shown the file is
-    // rewritten every second, because the layer drops a bypass that is not renewed (lease).
-    std::chrono::steady_clock::time_point lastSave{};
     AutoRules autoRules;
     DisplayContext context;
     bool contextKnown = false;
@@ -222,7 +219,6 @@ bool saveAdvancedValues(UiState& ui) {
         ui.messageIsError = true;
         return false;
     }
-    ui.lastSave = std::chrono::steady_clock::now();
     return true;
 }
 
@@ -841,9 +837,6 @@ int main(int argc, char** argv) {
         if (tickAutoCompare(ui, now)) {
             saveAdvancedValues(ui);
             dirty = true;
-        } else if ((ui.compare || ui.autoOriginal) && now - ui.lastSave >= std::chrono::seconds(1)) {
-            // Renew the bypass lease (see UiState::lastSave).
-            saveAdvancedValues(ui);
         }
         // Follow the display mode and the scene app once a second. Wait while the
         // user drags a slider, holds compare, runs auto compare or picks a save slot,

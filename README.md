@@ -15,7 +15,7 @@ This is a fork of [beko-kerbecotton/framecolor](https://github.com/beko-kerbecot
 
 It also includes two changes from [brugr/framecolor](https://github.com/brugr/framecolor): English and Japanese translations, and a fix for a `vrcompositor` crash when FrameColor loads alongside other Vulkan layers.
 
-Prebuilt archives are on this repository's Releases page. See [Installation](#installation).
+Prebuilt archives are on this repository's Releases page. See [Installation](#installation). The sharpen area button and Auto Compare are not in a release yet; 0.1.0-sharp.1 always sharpens the whole image.
 
 ## Overview
 
@@ -100,7 +100,7 @@ The button next to Sharpness chooses where sharpening applies. **Center only** (
 
 Press and hold **Hold to Compare** to see the image without FrameColor's Vulkan correction (color and sharpening). Release it to return to your settings. Panel brightness stays as set.
 
-To compare inside a game, where you cannot hold the button, press **Auto Compare** and hide the dashboard (not with the panel's X, which closes the panel and stops auto compare). The image switches between the uncorrected image and your settings every 3 seconds, starting with the uncorrected one; the button shows which one is on screen. Auto compare turns itself off after 60 seconds. Press it again to stop earlier. Auto presets wait while it runs. If the dashboard stops responding while the uncorrected image is shown, FrameColor returns to your settings within 5 seconds.
+To compare inside a game, where you cannot hold the button, press **Auto Compare** and hide the dashboard (not with the panel's X, which closes the panel and stops auto compare). The image switches between the uncorrected image and your settings every 3 seconds, starting with the uncorrected one; the button shows which one is on screen. Auto compare turns itself off after 60 seconds. Press it again to stop earlier. Auto presets wait while it runs.
 
 **Auto Preset** applies a preset when the display mode or the app changes. Press a button to step through Off, Standard, Vivid, Night, and your saved P1–P3:
 
