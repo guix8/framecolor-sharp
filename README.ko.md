@@ -15,7 +15,7 @@
 
 [brugr/framecolor](https://github.com/brugr/framecolor)의 변경 두 가지도 들어 있습니다. 영어·일본어 번역, 그리고 FrameColor가 다른 Vulkan 레이어와 함께 로드될 때 `vrcompositor`가 죽는 문제의 수정입니다.
 
-이 포크에는 릴리스 압축 파일이 없습니다. [설치](#설치)에 적힌 대로 Steam Frame에서 빌드해서 설치합니다.
+미리 빌드한 압축 파일은 이 저장소의 Releases 페이지에 있습니다. [설치](#설치)를 보세요.
 
 ## 개요
 
@@ -28,11 +28,34 @@ FrameColor는 Steam Frame 전용입니다. 색 보정은 SteamVR의 `vrcomposito
 - `/opt/steamvr`에 설치된 기본 SteamVR을 쓰는 Steam Frame(SteamOS, ARM64)
 - Steam Frame에서 명령을 실행할 수 있도록 개발자 모드와 SSH 접속
 - 설치할 때 LUT를 만드는 데 쓰는 Python 3.10 이상(Steam Frame에 설치되어 있어야 함)
-- [개발](#개발)에 적힌 빌드 도구. 2026-10-28 기준으로 Steam Frame의 SteamOS에 모두 들어 있었습니다.
+- 소스로 빌드할 때만: [개발](#개발)에 적힌 빌드 도구. 2026-10-28 기준으로 Steam Frame의 SteamOS에 모두 들어 있었습니다.
 
 ## 설치
 
-아래 명령은 Steam Frame에서 실행합니다. 예를 들어 SSH로 접속해서 실행합니다(`ssh steamos@FRAME_IP`). 이 저장소를 클론한 뒤 빌드하고 설치합니다.
+### 릴리스 압축 파일로 설치
+
+이 저장소의 Releases 페이지에서 `framecolor-VERSION-steamframe-aarch64.tar.gz`와 같은 이름의 `.sha256` 파일을 받습니다. 아래의 `VERSION`과 `FRAME_IP`는 릴리스 버전(예: `0.1.0-sharp.1`)과 Steam Frame의 IP 주소로 바꿉니다.
+
+PC에서 두 파일을 Steam Frame의 홈 폴더로 복사하고 SSH로 접속합니다.
+
+```sh
+scp framecolor-VERSION-steamframe-aarch64.tar.gz framecolor-VERSION-steamframe-aarch64.tar.gz.sha256 steamos@FRAME_IP:
+ssh steamos@FRAME_IP
+```
+
+나머지 명령은 Steam Frame에서 실행합니다. 압축 파일을 확인한 뒤 풀어서 설치합니다.
+
+```sh
+sha256sum -c framecolor-VERSION-steamframe-aarch64.tar.gz.sha256
+tar -xzf framecolor-VERSION-steamframe-aarch64.tar.gz
+cd framecolor
+sh contrib/install.sh
+~/.local/bin/framecolorctl enable
+```
+
+### 소스로 빌드해서 설치
+
+아래 명령은 Steam Frame에서 실행합니다. 이 저장소를 클론한 뒤 빌드하고 설치합니다.
 
 ```sh
 git clone <이 저장소의 주소> framecolor
@@ -41,13 +64,15 @@ sh contrib/install.sh
 ~/.local/bin/framecolorctl enable
 ```
 
-설치 스크립트는 `sudo` 없이 일반 사용자로 실행합니다. 대시보드와 Vulkan 레이어를 소스에서 빌드해서 `~/.local`과 `~/.config` 폴더에만 설치합니다. 처음 설치한 직후에는 Vulkan 보정이 꺼져 있습니다. 마지막 `enable` 명령이 보정과 대시보드를 함께 켜고 SteamVR을 다시 시작합니다.
+### 참고
+
+설치 스크립트는 `sudo` 없이 일반 사용자로 실행합니다. 릴리스 압축 파일에 든 실행 파일을 설치하고, 실행 파일이 없으면 대시보드와 Vulkan 레이어를 소스에서 빌드합니다. `~/.local`과 `~/.config` 폴더만 씁니다. 처음 설치한 직후에는 Vulkan 보정이 꺼져 있습니다. 마지막 `enable` 명령이 보정과 대시보드를 함께 켜고 SteamVR을 다시 시작합니다.
 
 원본 FrameColor를 이미 쓰고 있다면 같은 방법으로 덮어서 설치합니다. 저장한 조정값과 프리셋은 그대로 남고, 예전 형식의 파일도 읽습니다. 보정이 이미 켜져 있으면 설치 스크립트가 SteamVR을 다시 시작합니다.
 
-업데이트하려면 `git pull`을 실행하고 `sh contrib/install.sh`를 다시 실행합니다.
+업데이트하려면 새 릴리스 압축 파일을 같은 방법으로 설치하거나, `git pull`을 실행하고 `sh contrib/install.sh`를 다시 실행합니다.
 
-FrameColor를 완전히 지우려면 저장소 폴더에서 다음을 실행합니다.
+FrameColor를 완전히 지우려면 압축을 푼 폴더나 저장소 폴더에서 다음을 실행합니다.
 
 ```sh
 sh contrib/uninstall.sh

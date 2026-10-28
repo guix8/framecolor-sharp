@@ -15,7 +15,7 @@ This is a fork of [beko-kerbecotton/framecolor](https://github.com/beko-kerbecot
 
 It also includes two changes from [brugr/framecolor](https://github.com/brugr/framecolor): English and Japanese translations, and a fix for a `vrcompositor` crash when FrameColor loads alongside other Vulkan layers.
 
-This fork has no release archives. Build and install it on the Steam Frame as described under [Installation](#installation).
+Prebuilt archives are on this repository's Releases page. See [Installation](#installation).
 
 ## Overview
 
@@ -28,11 +28,34 @@ FrameColor is for Steam Frame only. Color correction is applied by a Vulkan laye
 - A Steam Frame (SteamOS, ARM64) using the stock SteamVR installation at `/opt/steamvr`
 - Developer Mode and SSH access, so you can transfer the archive to the Steam Frame and run commands on it
 - Python 3.10 or later on the Steam Frame, used to generate the LUT during installation
-- The build tools listed under [Development](#development). SteamOS on the Steam Frame shipped with all of them on 2026-10-28.
+- To build from source only: the build tools listed under [Development](#development). SteamOS on the Steam Frame shipped with all of them on 2026-10-28.
 
 ## Installation
 
-Run these commands on the Steam Frame, for example over SSH (`ssh steamos@FRAME_IP`). Clone this repository, then build and install:
+### From a release archive
+
+Download `framecolor-VERSION-steamframe-aarch64.tar.gz` and the matching `.sha256` file from this repository's Releases page. Replace `VERSION` and `FRAME_IP` below with the release version (for example `0.1.0-sharp.1`) and your Steam Frame's IP address.
+
+From your PC, copy both files to the Steam Frame's home directory and connect over SSH:
+
+```sh
+scp framecolor-VERSION-steamframe-aarch64.tar.gz framecolor-VERSION-steamframe-aarch64.tar.gz.sha256 steamos@FRAME_IP:
+ssh steamos@FRAME_IP
+```
+
+Run the remaining commands on the Steam Frame. Verify the archive, then extract and install it:
+
+```sh
+sha256sum -c framecolor-VERSION-steamframe-aarch64.tar.gz.sha256
+tar -xzf framecolor-VERSION-steamframe-aarch64.tar.gz
+cd framecolor
+sh contrib/install.sh
+~/.local/bin/framecolorctl enable
+```
+
+### From source
+
+Run these commands on the Steam Frame. Clone this repository, then build and install:
 
 ```sh
 git clone <this repository's URL> framecolor
@@ -41,13 +64,15 @@ sh contrib/install.sh
 ~/.local/bin/framecolorctl enable
 ```
 
-Run the installer as your regular user, without `sudo`. It builds the dashboard and the Vulkan layer from source and installs them in your `~/.local` and `~/.config` directories only. Vulkan correction is disabled immediately after a fresh installation. The final `enable` command enables both the correction and the dashboard, and restarts SteamVR.
+### Notes
+
+Run the installer as your regular user, without `sudo`. It installs the prebuilt binaries from a release archive, or builds the dashboard and the Vulkan layer from source when there are none, and uses only your `~/.local` and `~/.config` directories. Vulkan correction is disabled immediately after a fresh installation. The final `enable` command enables both the correction and the dashboard, and restarts SteamVR.
 
 If you already use upstream FrameColor, install over it the same way. Saved adjustments and presets are kept, and their older file formats are read. If correction is already enabled, the installer restarts SteamVR.
 
-To update, run `git pull` and `sh contrib/install.sh` again.
+To update, install a newer release archive the same way, or run `git pull` and `sh contrib/install.sh` again.
 
-To remove FrameColor completely, run this from the repository directory:
+To remove FrameColor completely, run this from the extracted archive or repository directory:
 
 ```sh
 sh contrib/uninstall.sh
