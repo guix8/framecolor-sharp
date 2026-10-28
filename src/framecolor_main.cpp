@@ -774,6 +774,10 @@ int main(int argc, char** argv) {
                     ui.context = context;
                     ui.contextKnown = true;
                     ui.appName = appDisplayName(context.appKey);
+                    // Visible with journalctl --user -u framecolor.service.
+                    std::fprintf(stderr, "FrameColor context: %s, app key \"%s\" (%s)\n",
+                                 context.streaming ? "PC streaming" : "standalone", context.appKey.c_str(),
+                                 ui.appName.c_str());
                     applyAutoPreset(ui);
                     dirty = true;
                 }
