@@ -96,6 +96,7 @@ SSHからは次のコマンドを使えます．
 ```sh
 ~/.local/bin/framecolorctl status
 ~/.local/bin/framecolorctl doctor
+~/.local/bin/framecolorctl bench [秒数]
 ~/.local/bin/framecolorctl disable
 ~/.local/bin/framecolorctl enable
 ~/.local/bin/framecolorctl language

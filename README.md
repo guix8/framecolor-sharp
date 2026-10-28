@@ -96,6 +96,7 @@ You can also use these commands over SSH:
 ```sh
 ~/.local/bin/framecolorctl status
 ~/.local/bin/framecolorctl doctor
+~/.local/bin/framecolorctl bench [seconds]
 ~/.local/bin/framecolorctl disable
 ~/.local/bin/framecolorctl enable
 ~/.local/bin/framecolorctl language

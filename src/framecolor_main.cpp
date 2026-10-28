@@ -1,4 +1,5 @@
 #include "auto_profile.h"
+#include "bench.h"
 #include "draw.h"
 #include "i18n.h"
 #include "openvr.h"
@@ -690,7 +691,11 @@ void activate(const Hit& hit, double x, UiState& ui, VrOverlay& overlay) {
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc >= 2 && std::string(argv[1]) == "--bench") {
+        const double seconds = argc >= 3 ? std::atof(argv[2]) : 8.0;
+        return runBench(clamp(seconds, 1.0, 60.0));
+    }
     signal(SIGINT, stopHandler); signal(SIGTERM, stopHandler);
     VrOverlay overlay; std::string error;
     while (!gStop) {

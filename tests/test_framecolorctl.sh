@@ -10,7 +10,8 @@ cleanup() {
     rm -f "$fc_layer/vkBasalt.json" "$fc_layer/vkBasalt.json.disabled" \
         "$fc_temp/bin/systemctl" "$fc_temp/bin/steamvr" "$fc_log" \
         "$fc_temp/.config/framecolor/guard-failure-limit" \
-        "$fc_temp/.config/framecolor/language.txt"
+        "$fc_temp/.config/framecolor/language.txt" "$fc_temp/.local/bin/framecolor"
+    rmdir "$fc_temp/.local/bin" 2>/dev/null || true
     rmdir "$fc_layer" "$fc_temp/.local/share/framecolor" "$fc_temp/.local/share" \
         "$fc_temp/.local" "$fc_temp/.config/framecolor" "$fc_temp/.config" \
         "$fc_temp/bin" "$fc_temp" 2>/dev/null || true
@@ -53,5 +54,13 @@ printf '%s\n' "$fc_lang_status" | grep -F 'Configured language: en' >/dev/null
 FRAMECOLOR_TEST_LOG="$fc_log" HOME="$fc_temp" PATH="$fc_temp/bin:$PATH" \
     sh "$fc_root/contrib/framecolorctl" language ja
 [ "$(cat "$fc_temp/.config/framecolor/language.txt")" = 'ja' ]
+
+mkdir -p "$fc_temp/.local/bin"
+printf '#!/bin/sh\nprintf "bench args: %%s\\n" "$*"\n' > "$fc_temp/.local/bin/framecolor"
+chmod +x "$fc_temp/.local/bin/framecolor"
+[ "$(HOME="$fc_temp" sh "$fc_root/contrib/framecolorctl" bench)" = 'bench args: --bench 8' ]
+[ "$(HOME="$fc_temp" sh "$fc_root/contrib/framecolorctl" bench 20)" = 'bench args: --bench 20' ]
+if HOME="$fc_temp" sh "$fc_root/contrib/framecolorctl" bench 0 2>/dev/null; then exit 1; fi
+if HOME="$fc_temp" sh "$fc_root/contrib/framecolorctl" bench 8s 2>/dev/null; then exit 1; fi
 
 printf 'framecolorctl disable/status tests passed\n'

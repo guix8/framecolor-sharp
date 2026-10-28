@@ -21,6 +21,7 @@ add_executable(framecolor
   src/draw.cpp
   src/i18n.cpp
   src/auto_profile.cpp
+  src/bench.cpp
   src/vk_texture.cpp
   src/vr_overlay.cpp
 )
