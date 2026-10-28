@@ -113,6 +113,27 @@ If SteamVR fails and exits within 10 seconds of starting, the startup guard disa
 
 The guard cannot guarantee automatic recovery from every failure. Keep a way to recover manually over SSH.
 
+## Performance
+
+`framecolorctl bench [seconds]` measures the compositor while FrameColor runs. It connects as a background app, so it never starts SteamVR, and nothing runs unless you use the command.
+
+Measure in the same scene with the dashboard closed:
+
+1. `framecolorctl disable`, then `framecolorctl bench`: baseline without FrameColor.
+2. `framecolorctl enable`, sharpness 0%, then `framecolorctl bench`: the cost of FrameColor itself.
+3. Sharpness 35% and 100%, then `framecolorctl bench` for each: the extra cost of sharpening.
+
+`enable` and `disable` restart SteamVR, so start the scene again before you measure. Watch the dropped and reprojected frames first; they are what you notice in the headset.
+
+Record the results here, with the SteamOS and SteamVR versions, so you can compare them after an update.
+
+| Mode | Correction | Sharpness | Compositor GPU ms p50 / p95 | Dropped / reprojected | vrcompositor RSS |
+| --- | --- | --- | --- | --- | --- |
+| Standalone | Off | – | not measured yet | | |
+| Standalone | On | 0% | not measured yet | | |
+| Standalone | On | 35% | not measured yet | | |
+| Standalone | On | 100% | not measured yet | | |
+
 ## Disclaimer
 
 FrameColor is an unofficial beta tool. SteamVR or SteamOS updates may break it.
