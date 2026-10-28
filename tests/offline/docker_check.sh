@@ -6,7 +6,7 @@
 #
 # It validates the shader, builds the Vulkan layer, compiles the dashboard
 # with -Wall -Wextra, runs tests/offline/harness.cpp, runs the shell tests,
-# and writes dashboard screenshots to build/offline/panel_en.png and panel_ja.png.
+# and writes dashboard screenshots to build/offline/panel_en.png, panel_ja.png and panel_ko.png.
 set -eu
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq >/dev/null
@@ -42,10 +42,10 @@ g++ -std=c++17 -Isrc -Ithird_party/openvr $(pkg-config --cflags cairo freetype2)
 XDG_CONFIG_HOME=/tmp/cfg /tmp/harness /tmp
 python3 -c "
 from PIL import Image
-for n in ('en', 'ja'):
+for n in ('en', 'ja', 'ko'):
     Image.frombytes('RGBA', (1200, 920), open('/tmp/panel_%s.rgba' % n, 'rb').read()).save('/out/panel_%s.png' % n)
 "
-echo "screenshots: build/offline/panel_en.png, panel_ja.png"
+echo "screenshots: build/offline/panel_en.png, panel_ja.png, panel_ko.png"
 
 echo "== shell tests"
 sh tests/test_guard.sh >/dev/null

@@ -2,18 +2,20 @@
 
 #include <array>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
 enum class Language {
     English = 0,
     Japanese = 1,
+    Korean = 2,
 };
 
 struct Translations {
     const char* code;         // ISO language code
     const char* displayName;  // Native language name shown in dropdown
-
+    const char* languageAuto; // Dropdown item that follows the Steam language
     const char* title;          // Overlay window title
     const char* dashboardName;  // SteamVR dashboard tab / tooltip name
 
@@ -66,14 +68,29 @@ const std::vector<Language>& availableLanguages();
 /** Get translation table for the specified language. */
 const Translations& getTranslations(Language lang);
 
-/** Parse a language code or alias (case-insensitive, e.g. "en", "ja", "ja_JP", "japanese"). */
+/** Parse a language code or alias (case-insensitive, e.g. "en", "ja", "ja_JP", "japanese", "koreana"). */
 Language languageFromCode(const std::string& code);
 
-/** Get canonical string code for a language ("en", "ja"). */
+/** Like languageFromCode, but returns nothing for a code that is not a supported language. */
+std::optional<Language> matchLanguage(const std::string& code);
+
+/** Get canonical string code for a language ("en", "ja", "ko"). */
 std::string languageCode(Language lang);
 
-/** Load language preference from config directory (language.txt), defaulting to English. */
+/**
+ * Pick the language when none is chosen: the Steam client language from
+ * ~/.steam/registry.vdf, then LC_ALL / LC_MESSAGES / LANG, then English.
+ */
+Language detectLanguage();
+
+/** True when language.txt is missing or says "auto", so the language follows detectLanguage(). */
+bool languageIsAuto(const std::filesystem::path& configDir);
+
+/** Load language preference from config directory (language.txt), detecting it when set to auto. */
 Language loadSavedLanguage(const std::filesystem::path& configDir);
 
 /** Save language preference to config directory (language.txt). */
 bool saveLanguage(const std::filesystem::path& configDir, Language lang);
+
+/** Save "auto" to language.txt so the language follows detectLanguage() again. */
+bool saveAutoLanguage(const std::filesystem::path& configDir);

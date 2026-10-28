@@ -75,6 +75,7 @@ struct UiState {
     bool languageOpen = false;
     bool resetConfirm = false;
     Language language = Language::English;
+    bool languageAuto = true;  // follow the Steam language (language.txt missing or "auto")
     bool saveMode = false;
     bool lookDirty = false;
     bool vulkanLayerActive = false;
@@ -570,14 +571,17 @@ void render(const FontSet& fonts, const UiState& ui, double pointerX, double poi
         const double menuY = langBtnY + langBtnH + 4;
         const double menuW = langBtnW;
         const double itemH = 42;
-        const double menuH = 10 + langs.size() * itemH;
+        const double menuH = 10 + (langs.size() + 1) * itemH;
         fillRect(p, menuX, menuY, menuW, menuH, kBg, 10);
         strokeRect(p, menuX, menuY, menuW, menuH, kAccent, 10);
+        // First item: follow the Steam language (arg -1)
+        button(p, hits, menuX + 8, menuY + 6, menuW - 16, itemH - 4, tr.languageAuto,
+               HitKind::LanguageChoice, -1, ui.languageAuto, true, pointerX, pointerY);
         for (size_t i = 0; i < langs.size(); ++i) {
             const auto& itemTr = getTranslations(langs[i]);
-            button(p, hits, menuX + 8, menuY + 6 + i * itemH, menuW - 16, itemH - 4,
+            button(p, hits, menuX + 8, menuY + 6 + (i + 1) * itemH, menuW - 16, itemH - 4,
                    itemTr.displayName, HitKind::LanguageChoice, static_cast<int>(langs[i]),
-                   ui.language == langs[i], true, pointerX, pointerY);
+                   !ui.languageAuto && ui.language == langs[i], true, pointerX, pointerY);
         }
     }
 
@@ -626,11 +630,13 @@ void activate(const Hit& hit, double x, UiState& ui, VrOverlay& overlay) {
             ui.resetConfirm = false;
             break;
         case HitKind::LanguageChoice:
-            ui.language = static_cast<Language>(hit.arg);
+            ui.languageAuto = hit.arg < 0;
+            ui.language = ui.languageAuto ? detectLanguage() : static_cast<Language>(hit.arg);
             ui.languageOpen = false;
             ui.resetConfirm = false;
             ui.message.clear();
-            saveLanguage(presetPath().parent_path(), ui.language);
+            if (ui.languageAuto) saveAutoLanguage(presetPath().parent_path());
+            else saveLanguage(presetPath().parent_path(), ui.language);
             overlay.setOverlayName(getTranslations(ui.language).dashboardName);
             break;
         case HitKind::SaveMode:
@@ -709,6 +715,7 @@ int main(int argc, char** argv) {
     std::vector<uint8_t> pixels; thumbnail(fonts, pixels); overlay.submitThumbnail(pixels.data(), kThumb);
     UiState ui;
     ui.language = loadSavedLanguage(presetPath().parent_path());
+    ui.languageAuto = languageIsAuto(presetPath().parent_path());
     overlay.setOverlayName(getTranslations(ui.language).dashboardName);
     readValues(ui.values); loadAdvancedValues(ui.values); loadCustomPresets(ui);
     ui.autoRules = loadAutoRules(autoPath());

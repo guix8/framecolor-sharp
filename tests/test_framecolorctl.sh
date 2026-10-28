@@ -55,6 +55,17 @@ FRAMECOLOR_TEST_LOG="$fc_log" HOME="$fc_temp" PATH="$fc_temp/bin:$PATH" \
     sh "$fc_root/contrib/framecolorctl" language ja
 [ "$(cat "$fc_temp/.config/framecolor/language.txt")" = 'ja' ]
 
+FRAMECOLOR_TEST_LOG="$fc_log" HOME="$fc_temp" PATH="$fc_temp/bin:$PATH" \
+    sh "$fc_root/contrib/framecolorctl" language ko
+[ "$(cat "$fc_temp/.config/framecolor/language.txt")" = 'ko' ]
+
+FRAMECOLOR_TEST_LOG="$fc_log" HOME="$fc_temp" PATH="$fc_temp/bin:$PATH" \
+    sh "$fc_root/contrib/framecolorctl" language auto
+[ "$(cat "$fc_temp/.config/framecolor/language.txt")" = 'auto' ]
+fc_lang_status=$(FRAMECOLOR_TEST_LOG="$fc_log" HOME="$fc_temp" PATH="$fc_temp/bin:$PATH" \
+    sh "$fc_root/contrib/framecolorctl" language status)
+printf '%s\n' "$fc_lang_status" | grep -F 'Configured language: auto' >/dev/null
+
 mkdir -p "$fc_temp/.local/bin"
 printf '#!/bin/sh\nprintf "bench args: %%s\\n" "$*"\n' > "$fc_temp/.local/bin/framecolor"
 chmod +x "$fc_temp/.local/bin/framecolor"

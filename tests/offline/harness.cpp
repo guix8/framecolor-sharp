@@ -156,6 +156,57 @@ int main(int argc, char** argv) {
     assert(readRssKb(proc, 200) == 409600);
     assert(readRssKb(proc, 201) == -1 && readRssKb(proc, -1) == -1);
 
+    // --- Language codes and automatic detection ---
+    assert(matchLanguage("koreana") == Language::Korean);
+    assert(matchLanguage("ko_KR.UTF-8") == Language::Korean);
+    assert(matchLanguage("ja_JP.UTF-8") == Language::Japanese);
+    assert(matchLanguage("english") == Language::English);
+    assert(!matchLanguage("french") && !matchLanguage("C.UTF-8") && !matchLanguage("kor"));
+    assert(languageFromCode("schinese") == Language::English);
+    {
+        const std::filesystem::path home = std::filesystem::temp_directory_path() / "framecolor-lang-test";
+        std::filesystem::remove_all(home);
+        std::filesystem::create_directories(home / ".steam");
+        const std::string oldHome = std::getenv("HOME") ? std::getenv("HOME") : "";
+        setenv("HOME", home.c_str(), 1);
+        unsetenv("LC_ALL");
+        unsetenv("LC_MESSAGES");
+        setenv("LANG", "en_US.UTF-8", 1);
+        // Steam language wins over LANG
+        std::ofstream(home / ".steam/registry.vdf")
+            << "\"Registry\"\n{\n\t\"HKCU\"\n\t{\n\t\t\"Software\"\n\t\t{\n\t\t\t\"Valve\"\n\t\t\t{\n"
+               "\t\t\t\t\"Steam\"\n\t\t\t\t{\n\t\t\t\t\t\"language\"\t\t\"koreana\"\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n}\n";
+        assert(detectLanguage() == Language::Korean);
+        // An unsupported Steam language falls back to the locale
+        std::ofstream(home / ".steam/registry.vdf") << "\t\t\t\t\t\"language\"\t\t\"french\"\n";
+        setenv("LANG", "ja_JP.UTF-8", 1);
+        assert(detectLanguage() == Language::Japanese);
+        setenv("LC_ALL", "ko_KR.UTF-8", 1);
+        assert(detectLanguage() == Language::Korean);
+        unsetenv("LC_ALL");
+        std::filesystem::remove(home / ".steam/registry.vdf");
+        setenv("LANG", "C.UTF-8", 1);
+        assert(detectLanguage() == Language::English);
+
+        // language.txt: missing or "auto" follows detection, a code is kept
+        const auto config = home / "config";
+        std::filesystem::create_directories(config);
+        setenv("LANG", "ko_KR.UTF-8", 1);
+        assert(languageIsAuto(config) && loadSavedLanguage(config) == Language::Korean);
+        assert(saveLanguage(config, Language::Japanese));
+        assert(!languageIsAuto(config) && loadSavedLanguage(config) == Language::Japanese);
+        assert(saveAutoLanguage(config));
+        assert(languageIsAuto(config) && loadSavedLanguage(config) == Language::Korean);
+
+        setenv("HOME", oldHome.c_str(), 1);
+        unsetenv("LANG");
+        std::filesystem::remove_all(home);
+    }
+    for (Language language : availableLanguages()) {
+        const auto& t = getTranslations(language);
+        assert(t.code == languageCode(language) && t.languageAuto && t.displayName && t.ruleSaved);
+    }
+
     // --- Screenshots ---
     UiState shot;
     shot.vulkanLayerActive = true;
@@ -178,6 +229,18 @@ int main(int argc, char** argv) {
     shot.message = getTranslations(shot.language).applied;
     render(fonts, shot, -1, -1, rgba, hits);
     writeRgba(outDir + "/panel_ja.rgba", rgba);
+
+    // Korean, with the language menu open (Auto is selected)
+    shot.language = Language::Korean;
+    shot.languageAuto = true;
+    shot.languageOpen = true;
+    shot.compare = false;
+    shot.context = {false, "steam.app.620980"};
+    shot.appName = "Beat Saber";
+    shot.message = getTranslations(shot.language).ruleSaved;
+    render(fonts, shot, -1, -1, rgba, hits);
+    writeRgba(outDir + "/panel_ko.rgba", rgba);
+    shot.languageOpen = false;
 
     std::cout << "harness OK, panel " << kWidth << "x" << kHeight << "\n";
     return 0;

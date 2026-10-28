@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <fstream>
 
 namespace {
@@ -12,6 +13,7 @@ Translations createEnglish() {
     // Language Metadata
     t.code = "en";
     t.displayName = "English";
+    t.languageAuto = "Auto";
 
     // Dashboard & Window Header
     t.title = "Display Color Adjustment";
@@ -68,6 +70,7 @@ Translations createJapanese() {
     // Language Metadata
     t.code = "ja";
     t.displayName = "日本語";
+    t.languageAuto = "自動";
 
     // Dashboard & Window Header
     t.title = "ディスプレイ色調整";
@@ -118,13 +121,98 @@ Translations createJapanese() {
     return t;
 }
 
+Translations createKorean() {
+    Translations t{};
+
+    // Language Metadata
+    t.code = "ko";
+    t.displayName = "한국어";
+    t.languageAuto = "자동";
+
+    // Dashboard & Window Header
+    t.title = "디스플레이 색 조정";
+    t.dashboardName = "디스플레이";
+
+    // Preset Buttons
+    t.builtinPresets = {"표준", "선명", "야간"};
+    t.emptySlotSuffix = " (비어 있음)";
+    t.save = "저장";
+    t.selectSlot = "저장할 슬롯 선택";
+    t.reset = "초기화";
+    t.resetConfirm = "확인?";
+
+    // Adjustment Controls & Sliders
+    t.panelBrightness = "패널 밝기";
+    t.adjustmentChannel = "조정 채널";
+    t.channelNames = {"전체", "빨강", "초록", "파랑"};
+    t.brightness = "밝기";
+    t.saturation = "채도";
+    t.contrast = "대비";
+    t.gamma = "감마";
+    t.sharpness = "선명도";
+    t.compare = "길게 눌러 비교";
+    t.compareHeld = "보정 없음";
+    t.autoPreset = "자동 프리셋";
+    t.standalone = "독립형";
+    t.streaming = "PC 스트리밍";
+    t.thisApp = "이 앱";
+    t.autoOff = "끔";
+    t.noApp = "앱 없음";
+    t.nowPrefix = "현재: ";
+    t.autoApplied = "자동 프리셋: ";
+    t.autoRestored = "자동 프리셋 전의 설정으로 되돌렸습니다";
+    t.ruleSaved = "규칙을 저장했습니다. 모드나 앱이 바뀌면 적용됩니다";
+
+    // Status & Feedback Messages
+    t.errorSaveSettings = "설정을 저장하지 못했습니다: ";
+    t.applied = "적용했습니다";
+    t.errorSaveAdvanced = "고급 설정을 저장할 수 없습니다";
+    t.errorSavePreset = "프리셋을 저장할 수 없습니다";
+    t.slotEmpty = "이 슬롯은 비어 있습니다";
+    t.presetApplied = "프리셋을 적용했습니다";
+    t.promptSaveSlot = "저장할 슬롯 P1~P3을 고르세요";
+    t.saveCanceled = "저장을 취소했습니다";
+    t.savedToSlotPrefix = "P";
+    t.savedToSlotSuffix = "에 저장했습니다";
+
+    return t;
+}
+
 const Translations kTranslationsEn = createEnglish();
 const Translations kTranslationsJa = createJapanese();
+const Translations kTranslationsKo = createKorean();
 
 const std::vector<Language> kLanguages = {
     Language::English,
     Language::Japanese,
+    Language::Korean,
 };
+
+std::string trimmedLower(const std::string& code) {
+    std::string s = code;
+    s.erase(0, s.find_first_not_of(" \t\r\n"));
+    s.erase(s.find_last_not_of(" \t\r\n") + 1);
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return s;
+}
+
+// The Steam client language ("english", "japanese", "koreana", ...) from the
+// first "language" key in ~/.steam/registry.vdf, or "" if it cannot be read.
+std::string steamClientLanguage() {
+    const char* home = std::getenv("HOME");
+    if (home == nullptr || *home == '\0') return {};
+    std::ifstream in(std::filesystem::path(home) / ".steam/registry.vdf");
+    for (std::string line; std::getline(in, line);) {
+        const auto key = line.find("\"language\"");
+        if (key == std::string::npos) continue;
+        const auto open = line.find('"', key + 10);
+        const auto close = open == std::string::npos ? open : line.find('"', open + 1);
+        if (close != std::string::npos) return line.substr(open + 1, close - open - 1);
+    }
+    return {};
+}
 
 }  // namespace
 
@@ -140,50 +228,61 @@ const Translations& getTranslations(Language lang) {
     switch (lang) {
         case Language::Japanese:
             return kTranslationsJa;
+        case Language::Korean:
+            return kTranslationsKo;
         case Language::English:
         default:
             return kTranslationsEn;
     }
 }
 
+std::optional<Language> matchLanguage(const std::string& code) {
+    const std::string s = trimmedLower(code);
+    // Locale names such as "ko_KR.UTF-8" match on their language part.
+    const auto is = [&s](const char* name) { return s == name || s.rfind(std::string(name) + "_", 0) == 0; };
+    if (is("ja") || s == "japanese" || s == "jp") return Language::Japanese;
+    if (is("ko") || s == "korean" || s == "koreana") return Language::Korean;
+    if (is("en") || s == "english") return Language::English;
+    return std::nullopt;
+}
+
 Language languageFromCode(const std::string& code) {
-    std::string s = code;
-    // Trim leading and trailing whitespace
-    s.erase(0, s.find_first_not_of(" \t\r\n"));
-    s.erase(s.find_last_not_of(" \t\r\n") + 1);
-
-    // Convert to lowercase
-    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-    });
-
-    if (s == "ja" || s.rfind("ja_", 0) == 0 || s == "japanese" || s == "jp") {
-        return Language::Japanese;
-    }
-    return Language::English;
+    return matchLanguage(code).value_or(Language::English);
 }
 
 std::string languageCode(Language lang) {
     switch (lang) {
         case Language::Japanese:
             return "ja";
+        case Language::Korean:
+            return "ko";
         case Language::English:
         default:
             return "en";
     }
 }
 
-Language loadSavedLanguage(const std::filesystem::path& configDir) {
-    const auto path = configDir / "language.txt";
-    std::ifstream in(path);
-    std::string code;
-    if (in >> code && !code.empty()) {
-        return languageFromCode(code);
+Language detectLanguage() {
+    if (const auto steam = matchLanguage(steamClientLanguage())) return *steam;
+    for (const char* name : {"LC_ALL", "LC_MESSAGES", "LANG"}) {
+        const char* value = std::getenv(name);
+        if (value == nullptr || *value == '\0') continue;
+        // The first variable that is set decides, as in POSIX locale lookup.
+        return languageFromCode(value);
     }
     return Language::English;
 }
 
-bool saveLanguage(const std::filesystem::path& configDir, Language lang) {
+namespace {
+
+std::string savedLanguageCode(const std::filesystem::path& configDir) {
+    std::ifstream in(configDir / "language.txt");
+    std::string code;
+    in >> code;
+    return trimmedLower(code);
+}
+
+bool writeLanguageFile(const std::filesystem::path& configDir, const std::string& code) {
     std::error_code ec;
     std::filesystem::create_directories(configDir, ec);
 
@@ -192,7 +291,7 @@ bool saveLanguage(const std::filesystem::path& configDir, Language lang) {
 
     std::ofstream out(temp, std::ios::trunc);
     if (!out) return false;
-    out << languageCode(lang) << '\n';
+    out << code << '\n';
     out.close();
 
     std::filesystem::rename(temp, path, ec);
@@ -201,4 +300,24 @@ bool saveLanguage(const std::filesystem::path& configDir, Language lang) {
         return false;
     }
     return true;
+}
+
+}  // namespace
+
+bool languageIsAuto(const std::filesystem::path& configDir) {
+    const std::string code = savedLanguageCode(configDir);
+    return code.empty() || code == "auto";
+}
+
+Language loadSavedLanguage(const std::filesystem::path& configDir) {
+    if (languageIsAuto(configDir)) return detectLanguage();
+    return languageFromCode(savedLanguageCode(configDir));
+}
+
+bool saveAutoLanguage(const std::filesystem::path& configDir) {
+    return writeLanguageFile(configDir, "auto");
+}
+
+bool saveLanguage(const std::filesystem::path& configDir, Language lang) {
+    return writeLanguageFile(configDir, languageCode(lang));
 }

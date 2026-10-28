@@ -7,6 +7,13 @@ fc_disabled="$fc_manifest.disabled"
 fc_legacy_unit="$HOME/.config/systemd/user/steamvr.service.d/90-framecolor-vkbasalt.conf"
 fc_guard_limit="$HOME/.config/framecolor/guard-failure-limit"
 fc_guard_failures="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/framecolor/failed-starts"
+fc_lang_file="$HOME/.config/framecolor/language.txt"
+
+# en, ja or ko when one is chosen; otherwise the dashboard follows the Steam language.
+fc_language_setting() {
+    fc_lang=$(cat "$fc_lang_file" 2>/dev/null || true)
+    case "$fc_lang" in en|ja|ko) printf '%s\n' "$fc_lang" ;; *) printf 'auto (follows the Steam language)\n' ;; esac
+}
 
 case "${1:-}" in
     enable)
@@ -49,9 +56,7 @@ case "${1:-}" in
         fc_count=$(cat "$fc_guard_failures" 2>/dev/null || true)
         case "$fc_count" in *[!0-9]*|'') fc_count=0 ;; esac
         printf 'Startup guard: disable after %s failed launch(es); current count %s\n' "$fc_limit" "$fc_count"
-        fc_lang=$(cat "$HOME/.config/framecolor/language.txt" 2>/dev/null || true)
-        case "$fc_lang" in ja) fc_lang="ja" ;; *) fc_lang="en" ;; esac
-        printf 'Language: %s\n' "$fc_lang"
+        printf 'Language: %s\n' "$(fc_language_setting)"
         if [ -e "$fc_legacy_unit" ]; then printf 'Warning: older Vulkan test drop-in is active.\n'; fi
         ;;
     doctor)
@@ -82,9 +87,8 @@ case "${1:-}" in
         esac
         ;;
     lang|language)
-        fc_lang_file="$HOME/.config/framecolor/language.txt"
         case "${2:-}" in
-            en|ja)
+            en|ja|ko|auto)
                 mkdir -p "$(dirname "$fc_lang_file")"
                 chmod 700 "$(dirname "$fc_lang_file")" 2>/dev/null || true
                 printf '%s\n' "$2" > "$fc_lang_file.tmp"
@@ -92,13 +96,11 @@ case "${1:-}" in
                 printf 'Language set to %s.\n' "$2"
                 ;;
             status|'')
-                fc_lang=$(cat "$fc_lang_file" 2>/dev/null || true)
-                case "$fc_lang" in ja) fc_lang="ja" ;; *) fc_lang="en" ;; esac
-                printf 'Configured language: %s\n' "$fc_lang"
-                printf 'Swap languages by appending to this command (e.g. framecolorctl language ja)\n'
+                printf 'Configured language: %s\n' "$(fc_language_setting)"
+                printf 'Swap languages by appending to this command (e.g. framecolorctl language ko, or auto)\n'
                 ;;
             *)
-                printf 'Usage: framecolorctl language en|ja|status\n' >&2
+                printf 'Usage: framecolorctl language en|ja|ko|auto|status\n' >&2
                 exit 2
                 ;;
         esac
@@ -117,7 +119,7 @@ case "${1:-}" in
         exec "$HOME/.local/bin/framecolor" --bench "$fc_seconds"
         ;;
     *)
-        printf 'Usage: framecolorctl enable|disable|status|doctor|guard 1|3|status|language en|ja|status|bench [seconds]\n' >&2
+        printf 'Usage: framecolorctl enable|disable|status|doctor|guard 1|3|status|language en|ja|ko|auto|status|bench [seconds]\n' >&2
         exit 2
         ;;
 esac
