@@ -1,6 +1,6 @@
 # FrameColor
 
-[English](README.md)
+[English](README.md) | [한국어](README.ko.md)
 
 > このリポジトリは [beko-kerbecotton/framecolor](https://github.com/beko-kerbecotton/framecolor) のフォークです．フォークで追加した機能（シャープネス，比較ボタン，自動プリセット，`framecolorctl bench`，韓国語と言語の自動選択）とインストール方法は [英語のREADME](README.md) を参照してください．このフォークにはリリースアーカイブがありません．下の「インストール」はアップストリームのリリースアーカイブ向けの説明です．
 

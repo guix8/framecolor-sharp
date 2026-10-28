@@ -1,6 +1,6 @@
 # FrameColor
 
-[日本語](README.ja.md)
+[日本語](README.ja.md) | [한국어](README.ko.md)
 
 ## About this fork
 
