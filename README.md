@@ -6,12 +6,12 @@
 
 This is a fork of [beko-kerbecotton/framecolor](https://github.com/beko-kerbecotton/framecolor). It adds:
 
-- **Sharpness**: AMD FidelityFX CAS, run inside the existing color correction pass, so no extra full-screen pass is added. Standalone apps often render below the panel resolution; this makes the upscaled image look sharper.
-- **Hold to Compare**: hold the button to see the image without correction.
+- **Sharpness**: AMD FidelityFX CAS, run inside the existing color correction pass, so no extra full-screen pass is added. Standalone apps often render below the panel resolution; this makes the upscaled image look sharper. By default it is applied around the center of each eye and fades out towards the lens edges, which are blurred anyway; this halves its cost (about 0.4 ms instead of 0.8 ms per frame on the Steam Frame). You can switch it to the whole image.
+- **Hold to Compare** and **Auto Compare**: hold the button to see the image without correction, or let it switch every 3 seconds so you can compare inside a game.
 - **Auto presets**: apply a preset by mode (standalone or PC streaming) or for the current SteamVR app.
-- **`framecolorctl bench`**: measure frame timing and memory while FrameColor runs.
+- **`framecolorctl bench`**: measure GPU time, frame timing and memory while FrameColor runs.
 - **Korean interface** and **automatic language selection** that follows the Steam client language.
-- A release build of the Vulkan layer. Upstream's `install.sh` and `package.sh` built it without optimization.
+- A release build of the Vulkan layer. Upstream's `install.sh` and `package.sh` built it without optimization (proposed upstream in beko-kerbecotton/framecolor#3).
 
 It also includes two changes from [brugr/framecolor](https://github.com/brugr/framecolor): English and Japanese translations, and a fix for a `vrcompositor` crash when FrameColor loads alongside other Vulkan layers.
 
@@ -34,7 +34,7 @@ FrameColor is for Steam Frame only. Color correction is applied by a Vulkan laye
 
 ### From a release archive
 
-Download `framecolor-VERSION-steamframe-aarch64.tar.gz` and the matching `.sha256` file from this repository's Releases page. Replace `VERSION` and `FRAME_IP` below with the release version (for example `0.1.0-sharp.1`) and your Steam Frame's IP address.
+Download `framecolor-VERSION-steamframe-aarch64.tar.gz` and the matching `.sha256` file from this repository's Releases page. Replace `VERSION` and `FRAME_IP` below with the release version (for example `0.1.0-sharp.2`) and your Steam Frame's IP address.
 
 From your PC, copy both files to the Steam Frame's home directory and connect over SSH:
 
@@ -66,7 +66,7 @@ sh contrib/install.sh
 
 ### Notes
 
-Run the installer as your regular user, without `sudo`. It installs the prebuilt binaries from a release archive, or builds the dashboard and the Vulkan layer from source when there are none, and uses only your `~/.local` and `~/.config` directories. Vulkan correction is disabled immediately after a fresh installation. The final `enable` command enables both the correction and the dashboard, and restarts SteamVR.
+Run the installer as your regular user, without `sudo`. It installs the prebuilt binaries from a release archive, or builds the dashboard and the Vulkan layer from source when there are none, and uses only your `~/.local` and `~/.config` directories. After a fresh installation the dashboard runs, but Vulkan correction is disabled and the dashboard's color controls stay disabled until you run `enable`, which enables the correction and restarts SteamVR.
 
 If you already use upstream FrameColor, install over it the same way. Saved adjustments and presets are kept, and their older file formats are read. If correction is already enabled, the installer restarts SteamVR.
 
@@ -82,8 +82,8 @@ Uninstalling also deletes saved adjustments and presets. Panel brightness stored
 
 ## Settings
 
-Open “Display Color Adjustment” in the SteamVR dashboard.
-The interface is available in English, Japanese and Korean. By default it follows the Steam client language, then the system locale, and falls back to English. Choose a language, or Auto to follow Steam again, from the language drop-down menu in the top-right corner of the overlay panel, or run `framecolorctl language en|ja|ko|auto`.
+Open **Display** (the RGB icon) in the SteamVR dashboard. The panel is titled “Display Color Adjustment”.
+The interface is available in English, Japanese and Korean. By default it follows the Steam client language, then the system locale, and falls back to English. Choose a language, or Auto to follow Steam again, from the language drop-down menu in the top-right corner of the overlay panel, or run `framecolorctl language en|ja|ko|auto`. A change made with `framecolorctl language` takes effect the next time the dashboard starts (after SteamVR restarts, or after `systemctl --user restart framecolor.service`).
 
 | Control | Range | Applies to |
 | --- | --- | --- |
@@ -92,11 +92,15 @@ The interface is available in English, Japanese and Korean. By default it follow
 | Saturation | 0–200% | Vulkan correction; global or per RGB channel; 100% is standard |
 | Contrast | 0–100% | Vulkan correction; global or per RGB channel; 0% is standard |
 | Gamma | 0.50–2.50 | Vulkan correction; global or per RGB channel; 1.00 is standard |
-| Sharpness | 0–100% | Vulkan correction (AMD CAS); shared across channels; 0% is off |
+| Sharpness | 0–100% | Vulkan correction (AMD CAS); around the center of each eye by default, or the whole image; shared across channels; 0% is off |
 
 Under Adjustment Channel, choose All, Red, Green, or Blue. Moving a control with All selected changes the current values of all three channels together. Panel brightness and sharpness are unaffected by the channel selection. To save the current settings, select Save and then P1, P2, or P3. Reset applies the Standard preset.
 
-Hold **Hold to Compare** to see the image without FrameColor's correction. Release it to return to your settings.
+The button next to Sharpness chooses where sharpening applies. **Center only** (default) sharpens around the center of each eye and fades out towards the lens edges, which are blurred anyway. **Whole image** sharpens the whole image; the sharpening then costs about twice as much (about 0.8 ms instead of 0.4 ms per frame; see [Performance](#performance)). This setting is not part of presets.
+
+Press and hold **Hold to Compare** to see the image without FrameColor's Vulkan correction (color and sharpening). Release it to return to your settings. Panel brightness stays as set.
+
+To compare inside a game, where you cannot hold the button, press **Auto Compare** and hide the dashboard (not with the panel's X, which closes the panel and stops auto compare). The image switches between the uncorrected image and your settings every 3 seconds, starting with the uncorrected one; the button shows which one is on screen. Auto compare turns itself off after 60 seconds. Press it again to stop earlier. Auto presets wait while it runs. If the dashboard stops responding while the uncorrected image is shown, FrameColor returns to your settings within 5 seconds.
 
 **Auto Preset** applies a preset when the display mode or the app changes. Press a button to step through Off, Standard, Vivid, Night, and your saved P1–P3:
 
@@ -111,39 +115,44 @@ You can also use these commands over SSH:
 ```sh
 ~/.local/bin/framecolorctl status
 ~/.local/bin/framecolorctl doctor
-~/.local/bin/framecolorctl bench [seconds]
+~/.local/bin/framecolorctl bench [seconds]   # default 8, 1–60; see Performance
 ~/.local/bin/framecolorctl disable
 ~/.local/bin/framecolorctl enable
-~/.local/bin/framecolorctl language
+~/.local/bin/framecolorctl language          # shows the setting; add en, ja, ko or auto to change it
 ```
 
 `disable` turns off both Vulkan correction and the dashboard; `enable` turns them back on. Both commands restart SteamVR. `disable` does not delete saved adjustments or presets. If the display becomes hard to see, run `disable` over SSH.
 
-If SteamVR fails and exits within 10 seconds of starting, the startup guard disables the Vulkan layer after one failure by default. The failure may have a cause unrelated to FrameColor. You can instead allow up to three consecutive failures:
-
-```sh
-~/.local/bin/framecolorctl guard 3
-~/.local/bin/framecolorctl guard 1
-```
+If SteamVR fails and exits within 10 seconds of starting, the startup guard disables the Vulkan layer after one failure by default. The failure may have a cause unrelated to FrameColor. To disable the layer only after three consecutive failures, run `framecolorctl guard 3`; `framecolorctl guard 1` restores the default.
 
 The guard cannot guarantee automatic recovery from every failure. Keep a way to recover manually over SSH.
 
 ## Performance
 
-`framecolorctl bench [seconds]` reports frame timing (frame count, compositor CPU and GPU time, dropped, mispresented and reprojected frames) and memory while FrameColor runs. It connects as a background app, so it never starts SteamVR, and nothing runs unless you use the command. Measure in the same scene with the dashboard closed, and watch the dropped and reprojected frames first; they are what you notice in the headset.
+`framecolorctl bench [seconds]` reports, while FrameColor runs:
 
-The compositor GPU time that SteamVR reports does **not** include the pass that the FrameColor layer adds, so `bench` cannot show the cost of sharpening. The per-process GPU time of `vrcompositor` does include it. On the Steam Frame's `msm` driver it is the `drm-engine-gpu` value in `/proc/<pid>/fdinfo/*`. Read it before and after a fixed interval and divide by the number of frames.
+- the GPU time of `vrcompositor` per frame and how busy the GPU is with it. This comes from the `drm-engine-gpu` value in `/proc/<pid>/fdinfo/*` (the Steam Frame's `msm` driver) and includes FrameColor's pass.
+- SteamVR's frame timing: frame count, compositor CPU and GPU time, and dropped, mispresented and reprojected frames. SteamVR's compositor GPU time does **not** include FrameColor's pass.
+- memory: RSS of `vrcompositor` and the dashboard, and the GPU memory of `vrcompositor`.
 
-Results on 2026-10-28 (SteamOS 0.4.5, BUILD_ID 20261022.6150929; SteamVR 1791331621; layer built in release mode). Each row is two 10 s runs, alternating between 0% and 100%:
+It connects as a background app, so it never starts SteamVR, and nothing runs unless you use the command. Measure in the same scene with the dashboard closed, and watch the dropped and reprojected frames first; they are what you notice in the headset.
 
-| Scene | Sharpness | vrcompositor GPU time per frame | GPU busy | Dropped frames |
-| --- | --- | --- | --- | --- |
-| Desktop window (Chrome), 90 Hz | 0% | 3.94–4.02 ms | 35–36% | 0 |
-| Desktop window (Chrome), 90 Hz | 100% | 4.76–4.78 ms | 43% | 0 |
-| Beat Saber menu, 120 Hz | 0% | 2.27–2.48 ms | 27–30% | 0–1 |
-| Beat Saber menu, 120 Hz | 100% | 3.06–3.07 ms | 37% | 0 |
+Other VR overlays change the result a lot. A browser extension that showed a 3D overlay through SteamVR raised `vrcompositor`'s GPU time by roughly 0.5–1 ms per frame, so close such overlays first. Scenes also drift. To compare two settings, switch between them every few seconds many times and compare neighboring intervals, rather than running one long measurement for each. The repository does not include a script for this yet.
 
-Sharpening costs about 0.7–0.8 ms of GPU time per frame and added no dropped frames in these scenes. The shader skips CAS only at 0%; any higher value runs it at full strength and blends, so lower settings are expected to cost the same (not measured). The baseline with FrameColor disabled has not been measured yet. The dashboard used about 47 MiB of RAM (RSS).
+FrameColor works on the final image that `vrcompositor` presents after lens distortion: 4320×2160, the two 2160×2160 eyes side by side. That is why sharpening can be limited to the center of each eye.
+
+Results on 2026-10-28 (SteamOS 0.4.5, BUILD_ID 20261022.6150929; SteamVR 1791331621; layer built in release mode). Scene: Beat Saber menu at 120 Hz, no other overlays. Sharpening costs were measured by switching sharpness every 2 s, 12 pairs per run (± is two standard errors):
+
+| What | vrcompositor GPU time per frame |
+| --- | --- |
+| FrameColor disabled | 1.59–1.61 ms (19% busy) |
+| FrameColor enabled, sharpness 0% | 1.7–2.1 ms, roughly 0.1–0.5 ms more (estimate: measured before and after a SteamVR restart, not in pairs) |
+| Sharpening, Center, 0% → 60% | +0.42 ms (±0.10) |
+| Sharpening, Center, 0% → 100% | +0.38 / +0.43 ms in two runs (±0.06 / ±0.07) |
+| Sharpening, Whole, 0% → 60% | +0.82 ms (±0.18) |
+| Sharpening, Whole, 0% → 100% | +0.78 ms (±0.05) |
+
+The Whole rows were measured with 0.1.0-sharp.1, which always sharpened the whole image with the same shader code. No extra dropped frames were seen with sharpening. Any sharpness above 0% runs CAS at full strength and blends, so the cost hardly depends on the value. With FrameColor enabled, `vrcompositor` used about 85 MiB more GPU memory (885 MiB instead of 800 MiB), roughly the size of two to three copies of the 4320×2160 image (about 36 MiB each). The dashboard used about 50 MiB of RAM (RSS).
 
 ## Disclaimer
 
@@ -169,7 +178,7 @@ sh contrib/package.sh VERSION        # Generate the archive and .sha256 file in 
 
 If `bin/framecolor` and `lib/libvkbasalt.so` exist in the source directory, `contrib/install.sh` installs them instead of building. Run `contrib/package.sh` on a Steam Frame (ARM64). Generated `build/` and `dist/` directories are excluded from Git.
 
-`tests/offline/harness.cpp` checks settings files, auto presets, language detection and `bench` statistics, and renders the dashboard in English, Japanese and Korean to `panel_*.rgba` (1200×920 RGBA). On a PC, `tests/offline/docker_check.sh` builds and runs everything that does not need a headset in Docker. To run the harness on the Steam Frame, link it with the real OpenVR library (ignoring unresolved symbols fails on ARM64):
+`tests/offline/harness.cpp` checks settings files, the sharpen area and Auto Compare buttons, auto presets, language detection, `bench` statistics and DRM fdinfo parsing, and renders the dashboard in English, Japanese and Korean to `panel_*.rgba` (1200×920 RGBA). On a PC, `tests/offline/docker_check.sh` builds and runs everything that does not need a headset in Docker. To run the harness on the Steam Frame, link it with the real OpenVR library (ignoring unresolved symbols fails on ARM64):
 
 ```sh
 g++ -std=c++17 -Isrc -Ithird_party/openvr $(pkg-config --cflags cairo freetype2 vulkan) \
