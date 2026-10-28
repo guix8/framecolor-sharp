@@ -15,7 +15,7 @@
 
 [brugr/framecolor](https://github.com/brugr/framecolor)의 변경 두 가지도 들어 있습니다. 영어·일본어 번역, 그리고 FrameColor가 다른 Vulkan 레이어와 함께 로드될 때 `vrcompositor`가 죽는 문제의 수정입니다.
 
-미리 빌드한 압축 파일은 이 저장소의 Releases 페이지에 있습니다. [설치](#설치)를 보세요. 선명도 범위 버튼과 자동 비교는 아직 릴리스에 없습니다. 0.1.0-sharp.1은 항상 화면 전체에 선명도를 적용합니다.
+미리 빌드한 압축 파일은 이 저장소의 Releases 페이지에 있습니다. [설치](#설치)를 보세요.
 
 ## 개요
 

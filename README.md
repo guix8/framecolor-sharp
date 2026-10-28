@@ -15,7 +15,7 @@ This is a fork of [beko-kerbecotton/framecolor](https://github.com/beko-kerbecot
 
 It also includes two changes from [brugr/framecolor](https://github.com/brugr/framecolor): English and Japanese translations, and a fix for a `vrcompositor` crash when FrameColor loads alongside other Vulkan layers.
 
-Prebuilt archives are on this repository's Releases page. See [Installation](#installation). The sharpen area button and Auto Compare are not in a release yet; 0.1.0-sharp.1 always sharpens the whole image.
+Prebuilt archives are on this repository's Releases page. See [Installation](#installation).
 
 ## Overview
 

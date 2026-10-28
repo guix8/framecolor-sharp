@@ -2,7 +2,7 @@
 
 [English](README.md) | [한국어](README.ko.md)
 
-> このリポジトリは [beko-kerbecotton/framecolor](https://github.com/beko-kerbecotton/framecolor) のフォークです．フォークで追加した機能（シャープネス（範囲は中央のみ・全体），比較ボタンと自動比較，自動プリセット，`framecolorctl bench`，韓国語と言語の自動選択）とソースからのビルド方法は [英語のREADME](README.md#about-this-fork) を参照してください．このフォークのリリースアーカイブはこのリポジトリのReleasesページにあり，下の「インストール」と同じ手順でインストールできます（`VERSION` は `0.1.0-sharp.2` などです）．シャープネスの範囲ボタンと自動比較はまだリリースに含まれていません．0.1.0-sharp.1は常に画面全体にシャープ化をかけます．
+> このリポジトリは [beko-kerbecotton/framecolor](https://github.com/beko-kerbecotton/framecolor) のフォークです．フォークで追加した機能（シャープネス（範囲は中央のみ・全体），比較ボタンと自動比較，自動プリセット，`framecolorctl bench`，韓国語と言語の自動選択）とソースからのビルド方法は [英語のREADME](README.md#about-this-fork) を参照してください．このフォークのリリースアーカイブはこのリポジトリのReleasesページにあり，下の「インストール」と同じ手順でインストールできます（`VERSION` は `0.1.0-sharp.2` などです）．
 
 ## 概要
 
