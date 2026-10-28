@@ -42,6 +42,8 @@ struct Translations {
     const char* noApp;                          // Shown when no app is detected
     const char* nowPrefix;                      // Prefix for the current display context
     const char* autoApplied;                    // Prefix for the auto preset message
+    const char* autoRestored;                   // Shown when leaving all auto preset rules
+    const char* ruleSaved;                      // Shown after a rule button changes a rule
 
     const char* errorSaveSettings;  // Error prefix when saving SteamVR analogGain setting fails
     const char* applied;            // Success message when a setting is applied

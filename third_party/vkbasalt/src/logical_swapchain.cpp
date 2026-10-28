@@ -6,6 +6,8 @@ namespace vkBasalt
     {
         if (imageCount > 0)
         {
+            // The last effect submits may still read the effect resources.
+            pLogicalDevice->vkd.QueueWaitIdle(pLogicalDevice->queue);
             effects.clear();
 
             pLogicalDevice->vkd.FreeCommandBuffers(

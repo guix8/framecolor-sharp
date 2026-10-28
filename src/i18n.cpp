@@ -44,6 +44,8 @@ Translations createEnglish() {
     t.noApp = "no app";
     t.nowPrefix = "Now: ";
     t.autoApplied = "Auto preset: ";
+    t.autoRestored = "Restored the settings from before the auto preset";
+    t.ruleSaved = "Rule saved. It applies when the mode or app changes";
 
     // Status & Feedback Messages
     t.errorSaveSettings = "Failed to save settings: ";
@@ -98,6 +100,8 @@ Translations createJapanese() {
     t.noApp = "アプリなし";
     t.nowPrefix = "現在: ";
     t.autoApplied = "自動プリセット: ";
+    t.autoRestored = "自動プリセット前の設定に戻しました";
+    t.ruleSaved = "規則を保存しました．モードかアプリが変わると適用します";
 
     // Status & Feedback Messages
     t.errorSaveSettings = "設定の保存に失敗: ";

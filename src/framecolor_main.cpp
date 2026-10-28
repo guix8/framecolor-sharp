@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -83,6 +84,9 @@ struct UiState {
     DisplayContext context;
     bool contextKnown = false;
     std::string appName;
+    DisplayContext pendingContext;  // a new context must be seen twice before it is used
+    int pendingCount = 0;
+    std::optional<Values> beforeAuto;  // values to restore when no auto rule applies any more
 };
 
 const std::array<Preset, 3> kBuiltins{{
@@ -186,8 +190,8 @@ bool saveAdvancedValues(UiState& ui) {
         << ui.values.saturation[2] << ' ' << ui.values.sharpen << ' '
         << (ui.compare ? 1 : 0) << '\n';
     out.close();
-    std::filesystem::rename(temporary, path, ec);
-    if (ec) {
+    if (out) std::filesystem::rename(temporary, path, ec);
+    if (!out || ec) {
         std::filesystem::remove(temporary);
         ui.message = tr.errorSaveAdvanced;
         ui.messageIsError = true;
@@ -246,8 +250,8 @@ bool saveCustomPresets(UiState& ui) {
             << v.sharpen << '\n';
     }
     out.close();
-    std::filesystem::rename(temporary, path, ec);
-    if (ec) {
+    if (out) std::filesystem::rename(temporary, path, ec);
+    if (!out || ec) {
         std::filesystem::remove(temporary);
         ui.message = tr.errorSavePreset;
         ui.messageIsError = true;
@@ -288,11 +292,23 @@ int governingRule(const UiState& ui) {
 }
 
 void applyAutoPreset(UiState& ui) {
+    const auto& tr = getTranslations(ui.language);
     const int index = resolveAutoPreset(ui.autoRules, ui.context);
-    if (index < 0 || !presetAt(ui, index).valid) return;
+    if (index < 0) {
+        if (!ui.beforeAuto) return;
+        applyPreset({*ui.beforeAuto, true}, ui);
+        ui.beforeAuto.reset();
+        if (!ui.messageIsError) ui.message = tr.autoRestored;
+        return;
+    }
+    if (!presetAt(ui, index).valid) {
+        ui.message = std::string(tr.autoApplied) + presetName(index, tr) + tr.emptySlotSuffix;
+        ui.messageIsError = true;
+        return;
+    }
+    if (!ui.beforeAuto) ui.beforeAuto = ui.values;
     applyPreset(presetAt(ui, index), ui);
     if (ui.messageIsError) return;
-    const auto& tr = getTranslations(ui.language);
     ui.message = std::string(tr.autoApplied) + presetName(index, tr);
 }
 
@@ -306,16 +322,21 @@ int ruleValue(const UiState& ui, int rule) {
 void cycleRule(UiState& ui, int rule) {
     const bool valid[3] = {ui.custom[0].valid, ui.custom[1].valid, ui.custom[2].valid};
     const int next = nextPresetChoice(ruleValue(ui, rule), valid);
+    const AutoRules previous = ui.autoRules;
     if (rule == 0) ui.autoRules.standalone = next;
     else if (rule == 1) ui.autoRules.streaming = next;
     else if (next < 0) ui.autoRules.apps.erase(ui.context.appKey);
     else ui.autoRules.apps[ui.context.appKey] = next;
+    // Do not apply now: stepping through the choices would replace the
+    // current look several times and drop unsaved edits.
     if (!saveAutoRules(autoPath(), ui.autoRules)) {
+        ui.autoRules = previous;
         ui.message = getTranslations(ui.language).errorSavePreset;
         ui.messageIsError = true;
         return;
     }
-    if (ui.contextKnown && governingRule(ui) == rule) applyAutoPreset(ui);
+    ui.message = getTranslations(ui.language).ruleSaved;
+    ui.messageIsError = false;
 }
 
 // OpenVR: the app key of the process that owns the scene, or "" if it has none.
@@ -521,7 +542,9 @@ void render(const FontSet& fonts, const UiState& ui, double pointerX, double poi
     const std::array<std::string, 3> ruleNames{{tr.standalone, tr.streaming, tr.thisApp}};
     for (int rule = 0; rule < 3; ++rule) {
         const bool usable = rule < 2 || !ui.context.appKey.empty();
-        const std::string value = rule < 2 || usable ? presetName(ruleValue(ui, rule), tr) : std::string("-");
+        const int choice = ruleValue(ui, rule);
+        std::string value = rule < 2 || usable ? presetName(choice, tr) : std::string("-");
+        if (choice >= 3 && !ui.custom[choice - 3].valid) value += tr.emptySlotSuffix;
         button(p, hits, 45 + rule * 375, 822, 360, 54, ruleNames[rule] + ": " + value, HitKind::AutoRule, rule,
                ui.contextKnown && governingRule(ui) == rule && ruleValue(ui, rule) >= 0, usable, pointerX, pointerY);
     }
@@ -730,16 +753,25 @@ int main() {
             }
         }
         // Follow the display mode and the scene app once a second. Wait while the
-        // user drags a slider or holds compare, so an auto preset never fights them.
-        if (now >= nextContextCheck && ui.activeSlider < 0 && !ui.compare) {
+        // user drags a slider, holds compare or picks a save slot, so an auto
+        // preset never fights them. A new context must be seen twice in a row,
+        // so a short gap while an app starts does not flip presets.
+        if (now >= nextContextCheck && ui.activeSlider < 0 && !ui.compare && !ui.saveMode) {
             nextContextCheck = now + std::chrono::seconds(1);
             DisplayContext context{isStreaming(), currentAppKey()};
-            if (!ui.contextKnown || context != ui.context) {
-                ui.context = context;
-                ui.contextKnown = true;
-                ui.appName = appDisplayName(context.appKey);
-                applyAutoPreset(ui);
-                dirty = true;
+            if (ui.contextKnown && context == ui.context) {
+                ui.pendingCount = 0;
+            } else {
+                ui.pendingCount = ui.pendingCount > 0 && context == ui.pendingContext ? ui.pendingCount + 1 : 1;
+                ui.pendingContext = context;
+                if (ui.pendingCount >= 2) {
+                    ui.pendingCount = 0;
+                    ui.context = context;
+                    ui.contextKnown = true;
+                    ui.appName = appDisplayName(context.appKey);
+                    applyAutoPreset(ui);
+                    dirty = true;
+                }
             }
         }
         const bool visible = overlay.panelVisible();
@@ -750,6 +782,7 @@ int main() {
         wasVisible = visible;
         std::this_thread::sleep_for(std::chrono::milliseconds(visible ? 33 : 250));
     }
+    if (ui.compare) { ui.compare = false; saveAdvancedValues(ui); }
     overlay.shutdown();
     return 0;
 }

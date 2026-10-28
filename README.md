@@ -89,7 +89,7 @@ Hold **Hold to Compare** to see the image without FrameColor's correction. Relea
 - **PC Streaming**: used while `vrlink` runs (a PC stream is active).
 - **This App**: used while the current SteamVR scene app runs. It wins over the mode rules. It is unavailable when the app has no SteamVR app key.
 
-FrameColor checks the mode and the app once per second. Your manual changes stay until the mode or the app changes again. Rules are saved in `~/.config/framecolor/auto.txt`.
+FrameColor checks the mode and the app once per second and switches after it sees the same change twice. A new rule applies at the next switch. Your manual changes stay until the mode or the app changes again. When you leave all rules (for example, you quit an app and the mode rule is Off), FrameColor restores the settings from before the first auto preset. Rules are saved in `~/.config/framecolor/auto.txt`.
 
 You can also use these commands over SSH:
 

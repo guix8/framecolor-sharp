@@ -19,9 +19,13 @@ AutoRules loadAutoRules(const std::filesystem::path& path) {
         std::string kind;
         if (!(row >> kind)) continue;
         if (kind == "app") {
-            std::string key;
+            // "app <index> <key>": the key is the rest of the line, so it may contain spaces.
             int index = -1;
-            if (row >> key >> index && validIndex(index) && index >= 0) rules.apps[key] = index;
+            std::string key;
+            if (!(row >> index) || !validIndex(index) || index < 0) continue;
+            std::getline(row >> std::ws, key);
+            while (!key.empty() && (key.back() == '\r' || key.back() == ' ')) key.pop_back();
+            if (!key.empty()) rules.apps[key] = index;
         } else {
             int index = -1;
             if (!(row >> index) || !validIndex(index)) continue;
@@ -38,10 +42,13 @@ bool saveAutoRules(const std::filesystem::path& path, const AutoRules& rules) {
     const auto temporary = path.string() + ".tmp";
     {
         std::ofstream out(temporary, std::ios::trunc);
-        if (!out) return false;
         out << "standalone " << rules.standalone << '\n' << "streaming " << rules.streaming << '\n';
-        for (const auto& [key, index] : rules.apps) out << "app " << key << ' ' << index << '\n';
-        if (!out) return false;
+        for (const auto& [key, index] : rules.apps) out << "app " << index << ' ' << key << '\n';
+        out.close();
+        if (!out) {
+            std::filesystem::remove(temporary, ec);
+            return false;
+        }
     }
     std::filesystem::rename(temporary, path, ec);
     if (ec) {

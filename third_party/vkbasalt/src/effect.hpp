@@ -16,6 +16,8 @@ namespace vkBasalt
     public:
         void virtual applyEffect(uint32_t imageIndex, VkCommandBuffer commandBuffer) = 0;
         void virtual updateEffect(){};
+        // Called before the effect command buffer for imageIndex is submitted.
+        void virtual prepareImage(uint32_t imageIndex){};
         virtual ~Effect(){};
 
     private:

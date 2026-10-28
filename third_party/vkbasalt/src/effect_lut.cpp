@@ -75,28 +75,38 @@ namespace vkBasalt
 
         lutDescriptorPool = createDescriptorPool(pLogicalDevice, poolSizes);
 
-        // The sharpen amount and the compare bypass live in a mapped uniform
-        // buffer, so changes do not need new pipelines or command buffers.
-        createBuffer(pLogicalDevice,
-                     sizeof(float) * 4,
-                     VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-                     sharpenBuffer,
-                     sharpenMemory);
-        VkResult result = pLogicalDevice->vkd.MapMemory(
-            pLogicalDevice->device, sharpenMemory, 0, VK_WHOLE_SIZE, 0, reinterpret_cast<void**>(&pParams));
-        ASSERT_VULKAN(result);
-        pParams[0] = 0.0f;
-        pParams[1] = 0.0f;
+        // The sharpen amount and the compare bypass live in mapped uniform
+        // buffers, so changes do not need new pipelines or command buffers.
+        // Each swapchain image has its own buffer: prepareImage() rewrites a
+        // buffer only when its image is presented again, so no queue wait is needed.
+        const size_t imageCount = inputImages.size();
+        paramBuffers.resize(imageCount);
+        paramMemory.resize(imageCount);
+        paramSlots.resize(imageCount);
+        paramSlotStale.assign(imageCount, false);
+        for (size_t i = 0; i < imageCount; ++i)
+        {
+            createBuffer(pLogicalDevice,
+                         sizeof(float) * 4,
+                         VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                         paramBuffers[i],
+                         paramMemory[i]);
+            VkResult result = pLogicalDevice->vkd.MapMemory(
+                pLogicalDevice->device, paramMemory[i], 0, VK_WHOLE_SIZE, 0, reinterpret_cast<void**>(&paramSlots[i]));
+            ASSERT_VULKAN(result);
+            paramSlots[i][0] = 0.0f;
+            paramSlots[i][1] = 0.0f;
+        }
 
-        sharpenDescriptorSetLayout = createUniformBufferDescriptorSetLayout(pLogicalDevice);
-        descriptorSetLayouts.push_back(sharpenDescriptorSetLayout);
+        paramDescriptorSetLayout = createUniformBufferDescriptorSetLayout(pLogicalDevice);
+        descriptorSetLayouts.push_back(paramDescriptorSetLayout);
 
         VkDescriptorPoolSize bufferPoolSize;
         bufferPoolSize.type            = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        bufferPoolSize.descriptorCount = 1;
+        bufferPoolSize.descriptorCount = static_cast<uint32_t>(imageCount);
 
-        sharpenDescriptorPool = createDescriptorPool(pLogicalDevice, {bufferPoolSize});
+        paramDescriptorPool = createDescriptorPool(pLogicalDevice, {bufferPoolSize});
 
         init(pLogicalDevice, format, imageExtent, inputImages, outputImages, pConfig);
 
@@ -107,7 +117,9 @@ namespace vkBasalt
                                                        {sampler},
                                                        std::vector<std::vector<VkImageView>>(1, std::vector<VkImageView>(1, lutImageView)))[0];
 
-        sharpenDescriptorSet = writeBufferDescriptorSet(pLogicalDevice, sharpenDescriptorPool, sharpenDescriptorSetLayout, sharpenBuffer);
+        for (VkBuffer buffer : paramBuffers)
+            paramDescriptorSets.push_back(
+                writeBufferDescriptorSet(pLogicalDevice, paramDescriptorPool, paramDescriptorSetLayout, buffer));
     }
     LutEffect::~LutEffect()
     {
@@ -116,15 +128,18 @@ namespace vkBasalt
         pLogicalDevice->vkd.DestroyDescriptorSetLayout(pLogicalDevice->device, lutDescriptorSetLayout, nullptr);
         pLogicalDevice->vkd.DestroyDescriptorPool(pLogicalDevice->device, lutDescriptorPool, nullptr);
         pLogicalDevice->vkd.FreeMemory(pLogicalDevice->device, lutMemory, nullptr);
-        pLogicalDevice->vkd.UnmapMemory(pLogicalDevice->device, sharpenMemory);
-        pLogicalDevice->vkd.DestroyBuffer(pLogicalDevice->device, sharpenBuffer, nullptr);
-        pLogicalDevice->vkd.FreeMemory(pLogicalDevice->device, sharpenMemory, nullptr);
-        pLogicalDevice->vkd.DestroyDescriptorSetLayout(pLogicalDevice->device, sharpenDescriptorSetLayout, nullptr);
-        pLogicalDevice->vkd.DestroyDescriptorPool(pLogicalDevice->device, sharpenDescriptorPool, nullptr);
+        for (size_t i = 0; i < paramBuffers.size(); ++i)
+        {
+            pLogicalDevice->vkd.UnmapMemory(pLogicalDevice->device, paramMemory[i]);
+            pLogicalDevice->vkd.DestroyBuffer(pLogicalDevice->device, paramBuffers[i], nullptr);
+            pLogicalDevice->vkd.FreeMemory(pLogicalDevice->device, paramMemory[i], nullptr);
+        }
+        pLogicalDevice->vkd.DestroyDescriptorSetLayout(pLogicalDevice->device, paramDescriptorSetLayout, nullptr);
+        pLogicalDevice->vkd.DestroyDescriptorPool(pLogicalDevice->device, paramDescriptorPool, nullptr);
     }
     void LutEffect::applyEffect(uint32_t imageIndex, VkCommandBuffer commandBuffer)
     {
-        const std::array<VkDescriptorSet, 2> descriptorSets{{lutDescriptorSet, sharpenDescriptorSet}};
+        const std::array<VkDescriptorSet, 2> descriptorSets{{lutDescriptorSet, paramDescriptorSets[imageIndex]}};
         pLogicalDevice->vkd.CmdBindDescriptorSets(commandBuffer,
                                                   VK_PIPELINE_BIND_POINT_GRAPHICS,
                                                   pipelineLayout,
@@ -217,22 +232,38 @@ namespace vkBasalt
                     }
         }
 
-        // A previous present can still read this image and buffer. Dashboard
-        // writes are throttled, so wait before replacing them in place.
-        pLogicalDevice->vkd.QueueWaitIdle(pLogicalDevice->queue);
         if (lookChanged)
         {
+            // A previous present can still read this image. Dashboard writes
+            // are throttled, so wait before replacing it in place.
+            pLogicalDevice->vkd.QueueWaitIdle(pLogicalDevice->queue);
             uploadToImage(pLogicalDevice, lutImage, {lutSize, lutSize, lutSize}, static_cast<uint32_t>(pixels.size()),
                           pixels.data(), 1, true);
             Logger::info("FrameColor live LUT updated");
         }
         if (paramsChanged)
         {
-            pParams[0] = std::clamp(values[12], 0.0f, 1.0f);
-            pParams[1] = values[13] > 0.5f ? 1.0f : 0.0f;
-            Logger::info("FrameColor sharpen " + std::to_string(pParams[0]) + " bypass " + std::to_string(pParams[1]));
+            // A dashboard that stopped while compare was held leaves bypass at 1.
+            // Honour bypass only after this layer has seen it at 0 once, so that
+            // stale flag cannot hide the correction.
+            if (values[13] <= 0.5f)
+                bypassArmed = true;
+            params = {std::clamp(values[12], 0.0f, 1.0f), bypassArmed && values[13] > 0.5f ? 1.0f : 0.0f};
+            std::fill(paramSlotStale.begin(), paramSlotStale.end(), true);
+            Logger::debug("FrameColor sharpen " + std::to_string(params[0]) + " bypass " + std::to_string(params[1]));
         }
         frameColorValues = values;
         hasFrameColorValues = true;
+    }
+    void LutEffect::prepareImage(uint32_t imageIndex)
+    {
+        // The submit that last read this slot has finished: the app can present
+        // image imageIndex again only after the presentation engine released it,
+        // and that presentation waited on the semaphore of that submit.
+        if (imageIndex >= paramSlotStale.size() || !paramSlotStale[imageIndex])
+            return;
+        paramSlots[imageIndex][0] = params[0];
+        paramSlots[imageIndex][1] = params[1];
+        paramSlotStale[imageIndex] = false;
     }
 } // namespace vkBasalt

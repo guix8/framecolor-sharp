@@ -29,6 +29,7 @@ namespace vkBasalt
         ~LutEffect();
         void applyEffect(uint32_t imageIndex, VkCommandBuffer commandBuffer) override;
         void updateEffect() override;
+        void prepareImage(uint32_t imageIndex) override;
 
     private:
         VkImage               lutImage;
@@ -37,12 +38,16 @@ namespace vkBasalt
         VkDescriptorSetLayout lutDescriptorSetLayout;
         VkDescriptorPool      lutDescriptorPool;
         VkDescriptorSet       lutDescriptorSet;
-        VkBuffer              sharpenBuffer;
-        VkDeviceMemory        sharpenMemory;
-        float*                pParams = nullptr; // {sharpen amount, bypass}
-        VkDescriptorSetLayout sharpenDescriptorSetLayout;
-        VkDescriptorPool      sharpenDescriptorPool;
-        VkDescriptorSet       sharpenDescriptorSet;
+        // One {sharpen amount, bypass} uniform buffer per swapchain image.
+        std::vector<VkBuffer>        paramBuffers;
+        std::vector<VkDeviceMemory>  paramMemory;
+        std::vector<float*>          paramSlots;
+        std::vector<bool>            paramSlotStale;
+        std::vector<VkDescriptorSet> paramDescriptorSets;
+        VkDescriptorSetLayout        paramDescriptorSetLayout;
+        VkDescriptorPool             paramDescriptorPool;
+        std::array<float, 2>         params{};
+        bool                         bypassArmed = false;
         uint32_t              lutSize = 0;
         bool                  hasFrameColorValues = false;
         std::array<float, 14> frameColorValues{};

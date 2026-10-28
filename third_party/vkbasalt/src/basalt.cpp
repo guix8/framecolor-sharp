@@ -507,6 +507,7 @@ namespace vkBasalt
             for (auto& effect : pLogicalSwapchain->effects)
             {
                 effect->updateEffect();
+                effect->prepareImage(index);
             }
 
             VkSubmitInfo submitInfo;
