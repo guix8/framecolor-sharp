@@ -61,5 +61,27 @@ std::optional<uint64_t> drmEngineDeltaNs(const DrmGpuUsage& start, const DrmGpuU
 /** A DRM fdinfo memory value such as "880204 KiB", "10 MiB" or "4096" (bytes), in KiB. */
 uint64_t drmMemoryKb(const std::string& value);
 
+/** Means of paired measurements (a, b) and the mean difference b - a with its 95% half-interval. */
+struct PairStats {
+    size_t pairs = 0;
+    double meanA = 0.0, meanB = 0.0, meanDiff = 0.0, ci95 = 0.0;
+};
+PairStats pairedStats(const std::vector<std::pair<double, double>>& samples);
+
+/** Two-sided 95% critical value of Student's t for df degrees of freedom (0 for df 0). */
+double studentT95(size_t df);
+
+/**
+ * current.txt with the sharpness (13th value) replaced, or nothing if the text is not a
+ * current.txt with at least 12 values (the dashboard writes 15).
+ */
+std::optional<std::string> currentWithSharpness(const std::string& text, double sharpness);
+
+/**
+ * Compare two sharpness values in the running scene: switch between them every 2 s and
+ * compare vrcompositor's GPU time in neighbouring intervals. Restores current.txt at the end.
+ */
+int runBenchCompare(double sharpnessA, double sharpnessB, int pairs);
+
 /** Run the benchmark for the given seconds and print the report. Returns the exit code. */
 int runBench(double seconds);

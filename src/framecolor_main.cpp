@@ -647,7 +647,8 @@ const Hit* hitTest(const std::vector<Hit>& hits, double x, double y) {
     return nullptr;
 }
 
-void activate(const Hit& hit, double x, UiState& ui, VrOverlay& overlay) {
+// overlay may be null (offline tests); only the language choice renames the dashboard tab.
+void activate(const Hit& hit, double x, UiState& ui, VrOverlay* overlay) {
     const auto& tr = getTranslations(ui.language);
     switch (hit.kind) {
         case HitKind::Slider:
@@ -681,7 +682,7 @@ void activate(const Hit& hit, double x, UiState& ui, VrOverlay& overlay) {
             ui.message.clear();
             if (ui.languageAuto) saveAutoLanguage(presetPath().parent_path());
             else saveLanguage(presetPath().parent_path(), ui.language);
-            overlay.setOverlayName(getTranslations(ui.language).dashboardName);
+            if (overlay) overlay->setOverlayName(getTranslations(ui.language).dashboardName);
             break;
         case HitKind::SaveMode:
             ui.saveMode = !ui.saveMode;
@@ -763,12 +764,34 @@ void activate(const Hit& hit, double x, UiState& ui, VrOverlay& overlay) {
     }
 }
 
+// A whole decimal number in lo..hi (no sign, no leading zeros beyond "0", no other characters).
+std::optional<int> parseIntArg(const char* text, int lo, int hi) {
+    const std::string s = text ? text : "";
+    if (s.empty() || s.size() > 3 || s.find_first_not_of("0123456789") != std::string::npos ||
+        (s.size() > 1 && s[0] == '0'))
+        return std::nullopt;
+    const int value = std::stoi(s);
+    if (value < lo || value > hi) return std::nullopt;
+    return value;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
     if (argc >= 2 && std::string(argv[1]) == "--bench") {
         const double seconds = argc >= 3 ? std::atof(argv[2]) : 8.0;
         return runBench(clamp(seconds, 1.0, 60.0));
+    }
+    if (argc >= 2 && std::string(argv[1]) == "--bench-compare") {
+        // Sharpness in whole percent, so no locale-dependent decimals cross the command line
+        const auto a = argc >= 4 ? parseIntArg(argv[2], 0, 100) : std::nullopt;
+        const auto b = argc >= 4 ? parseIntArg(argv[3], 0, 100) : std::nullopt;
+        const auto pairs = argc >= 5 ? parseIntArg(argv[4], 5, 60) : std::optional<int>(12);
+        if (!a || !b || !pairs || argc > 5) {
+            std::fprintf(stderr, "Usage: framecolor --bench-compare A B [pairs]  (A, B: sharpness 0-100; pairs 5-60)\n");
+            return 2;
+        }
+        return runBenchCompare(*a / 100.0, *b / 100.0, *pairs);
     }
     signal(SIGINT, stopHandler); signal(SIGTERM, stopHandler);
     VrOverlay overlay; std::string error;
@@ -812,7 +835,7 @@ int main(int argc, char** argv) {
                 px = py = -1; ui.activeSlider = -1; dirty = true;
                 if (ui.compare) { ui.compare = false; saveAdvancedValues(ui); }
             } else if (e.type == PointerInput::Type::Down) {
-                if (const Hit* hit = hitTest(hits, e.x, e.y)) activate(*hit, e.x, ui, overlay);
+                if (const Hit* hit = hitTest(hits, e.x, e.y)) activate(*hit, e.x, ui, &overlay);
                 else {
                     ui.channelOpen = false;
                     ui.languageOpen = false;

@@ -73,5 +73,13 @@ chmod +x "$fc_temp/.local/bin/framecolor"
 [ "$(HOME="$fc_temp" sh "$fc_root/contrib/framecolorctl" bench 20)" = 'bench args: --bench 20' ]
 if HOME="$fc_temp" sh "$fc_root/contrib/framecolorctl" bench 0 2>/dev/null; then exit 1; fi
 if HOME="$fc_temp" sh "$fc_root/contrib/framecolorctl" bench 8s 2>/dev/null; then exit 1; fi
+[ "$(HOME="$fc_temp" sh "$fc_root/contrib/framecolorctl" bench --compare 0 60)" = 'bench args: --bench-compare 0 60 12' ]
+[ "$(HOME="$fc_temp" sh "$fc_root/contrib/framecolorctl" bench --compare 35 100 20)" = 'bench args: --bench-compare 35 100 20' ]
+for fc_bad in '0' '0 0.6' '0 101' '0 60 4' '0 60 61' '010 60' '0 0100' '99999999999999999999 60' '-5 60' '0 60 12 1'; do
+    # shellcheck disable=SC2086
+    if HOME="$fc_temp" sh "$fc_root/contrib/framecolorctl" bench --compare $fc_bad 2>/dev/null; then
+        printf 'accepted bad bench --compare arguments: %s\n' "$fc_bad" >&2; exit 1
+    fi
+done
 
 printf 'framecolorctl disable/status tests passed\n'

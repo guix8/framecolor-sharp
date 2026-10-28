@@ -3,13 +3,19 @@
 #include "auto_profile.h"
 #include "openvr.h"
 
+#include <fcntl.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <chrono>
+#include <cerrno>
+#include <cmath>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <iomanip>
+#include <iterator>
 #include <sstream>
 #include <thread>
 
@@ -115,6 +121,51 @@ DrmGpuUsage readDrmGpuUsage(const std::filesystem::path& procRoot, int pid) {
     return usage;
 }
 
+PairStats pairedStats(const std::vector<std::pair<double, double>>& samples) {
+    PairStats s;
+    s.pairs = samples.size();
+    if (samples.empty()) return s;
+    for (const auto& [a, b] : samples) {
+        s.meanA += a;
+        s.meanB += b;
+    }
+    s.meanA /= s.pairs;
+    s.meanB /= s.pairs;
+    s.meanDiff = s.meanB - s.meanA;
+    if (s.pairs >= 2) {
+        double variance = 0.0;
+        for (const auto& [a, b] : samples) variance += std::pow((b - a) - s.meanDiff, 2);
+        variance /= s.pairs - 1;
+        s.ci95 = studentT95(s.pairs - 1) * std::sqrt(variance / s.pairs);
+    }
+    return s;
+}
+
+double studentT95(size_t df) {
+    // Two-sided 95% critical values of Student's t; with few pairs 2 * SE would be far too narrow.
+    static const double table[] = {0,     12.706, 4.303, 3.182, 2.776, 2.571, 2.447, 2.365, 2.306, 2.262, 2.228,
+                                   2.201, 2.179,  2.160, 2.145, 2.131, 2.120, 2.110, 2.101, 2.093, 2.086, 2.080,
+                                   2.074, 2.069,  2.064, 2.060, 2.056, 2.052, 2.048, 2.045, 2.042};
+    if (df == 0) return 0.0;
+    if (df <= 30) return table[df];
+    return df <= 40 ? 2.030 : (df <= 60 ? 2.010 : 1.990);
+}
+
+std::optional<std::string> currentWithSharpness(const std::string& text, double sharpness) {
+    std::istringstream in(text);
+    std::vector<double> values;
+    for (double value; in >> value;) values.push_back(value);
+    if (values.size() < 12 || !std::all_of(values.begin(), values.end(), [](double v) { return std::isfinite(v); }))
+        return std::nullopt;
+    if (values.size() < 13) values.resize(13, 0.0);
+    values[12] = sharpness;
+    std::ostringstream out;
+    out << std::setprecision(9);
+    for (size_t i = 0; i < values.size(); ++i) out << (i ? " " : "") << values[i];
+    out << '\n';
+    return out.str();
+}
+
 std::optional<uint64_t> drmEngineDeltaNs(const DrmGpuUsage& start, const DrmGpuUsage& end) {
     std::optional<uint64_t> total;
     for (const auto& [client, endNs] : end.engineNs) {
@@ -199,12 +250,20 @@ int runBench(double seconds) {
     const DrmGpuUsage gpuStart = readDrmGpuUsage("/proc", compositorPid);
     const auto start = std::chrono::steady_clock::now();
     bool compareSeen = false;  // hold or auto compare switches the correction off part of the time
+    // GetFrameTimings keeps returning its history when the headset is off: compare the
+    // newest frame index of the first and the last read.
+    std::optional<uint32_t> newestFirst;
+    uint32_t newestLast = 0;
     // The compositor keeps a short history, so read it every 0.5 s.
     while (std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() < seconds) {
         compareSeen = compareSeen || compareActive();
         vr::Compositor_FrameTiming timing[128];
         for (auto& t : timing) t.m_nSize = sizeof(vr::Compositor_FrameTiming);
         const uint32_t count = compositor->GetFrameTimings(timing, 128);
+        uint32_t newest = 0;
+        for (uint32_t i = 0; i < count; ++i) newest = std::max(newest, timing[i].m_nFrameIndex);
+        if (!newestFirst) newestFirst = newest;
+        newestLast = newest;
         for (uint32_t i = 0; i < count; ++i) {
             const auto& t = timing[i];
             samples.push_back({t.m_nFrameIndex, t.m_flSystemTimeInSeconds, t.m_flCompositorRenderGpuMs,
@@ -228,7 +287,9 @@ int runBench(double seconds) {
     std::printf("  frames                 %zu (%.1f Hz)\n", s.frames, s.refreshHz);
     // The per-process time includes FrameColor's pass; SteamVR's compositor GPU time does not.
     const std::optional<uint64_t> busy = drmEngineDeltaNs(gpuStart, gpuEnd);
-    if (busy && elapsed > 0.0 && s.refreshHz > 0.0) {
+    if (!newestFirst || newestLast <= *newestFirst) {
+        std::printf("  No frames were presented during the run (headset off?). SteamVR's frame timing below is from before the run.\n");
+    } else if (busy && elapsed > 0.0 && s.refreshHz > 0.0) {
         const double busyNs = static_cast<double>(*busy);
         const double frames = elapsed * s.refreshHz;
         std::printf("  vrcompositor GPU       %.2f ms/frame, %.1f%% busy (includes FrameColor)\n", busyNs / 1e6 / frames,
@@ -247,4 +308,196 @@ int runBench(double seconds) {
         std::printf("  vrcompositor GPU mem   %.1f MiB resident (sum over DRM clients)\n", gpuEnd.residentKb / 1024.0);
     printMemory("framecolor dashboard", findProcess("/proc", "framecolor", static_cast<int>(getpid())));
     return 0;
+}
+
+namespace {
+
+volatile std::sig_atomic_t gCompareStop = 0;
+void compareStopHandler(int) { gCompareStop = 1; }
+
+std::optional<std::string> readFile(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) return std::nullopt;
+    std::ostringstream text;
+    text << in.rdbuf();
+    return text.str();
+}
+
+// Write to a temporary file, flush it to disk, then rename it over path, so the layer and
+// the dashboard never see a partial file and a full disk cannot leave an empty one.
+bool writeFileAtomically(const std::filesystem::path& path, const std::string& text) {
+    const std::string temporary = path.string() + ".bench.tmp";
+    const int fd = ::open(temporary.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    if (fd < 0) return false;
+    bool ok = true;
+    for (size_t done = 0; ok && done < text.size();) {
+        const ssize_t n = ::write(fd, text.data() + done, text.size() - done);
+        if (n > 0) done += static_cast<size_t>(n);
+        else ok = n < 0 && errno == EINTR;
+    }
+    ok = ok && ::fsync(fd) == 0;
+    ok = ::close(fd) == 0 && ok;
+    std::error_code ec;
+    if (ok) std::filesystem::rename(temporary, path, ec);
+    if (!ok || ec) {
+        std::filesystem::remove(temporary, ec);
+        return false;
+    }
+    return true;
+}
+
+// Newest frame index in the compositor's timing history (0 if there is none).
+uint32_t newestFrame(vr::IVRCompositor* compositor) {
+    vr::Compositor_FrameTiming timing[128];
+    for (auto& t : timing) t.m_nSize = sizeof(vr::Compositor_FrameTiming);
+    const uint32_t count = compositor->GetFrameTimings(timing, 128);
+    uint32_t newest = 0;
+    for (uint32_t i = 0; i < count; ++i) newest = std::max(newest, timing[i].m_nFrameIndex);
+    return newest;
+}
+
+enum class WindowResult { Ok, Stopped, ChangedByOther, WriteFailed, NoFrames, NoGpuTime };
+
+}  // namespace
+
+int runBenchCompare(double sharpnessA, double sharpnessB, int pairs) {
+    const auto path = configDir() / "current.txt";
+    const auto backup = configDir() / "current.txt.bench-backup";
+    if (std::filesystem::exists(backup)) {
+        std::fprintf(stderr,
+                     "A previous bench --compare did not finish. Your settings from before it are in\n  %s\n"
+                     "Check them, then restore them with: mv %s %s\n(or delete that file to keep the current ones).\n",
+                     backup.c_str(), backup.c_str(), path.c_str());
+        return 1;
+    }
+    const std::optional<std::string> original = readFile(path);
+    if (!original || !currentWithSharpness(*original, sharpnessA)) {
+        std::fprintf(stderr, "%s is missing or old. Open the dashboard once so it saves the current format.\n",
+                     path.c_str());
+        return 1;
+    }
+    if (compareActive()) {
+        std::fprintf(stderr, "Compare or auto compare is on. Turn it off first.\n");
+        return 1;
+    }
+
+    vr::EVRInitError error = vr::VRInitError_None;
+    vr::VR_Init(&error, vr::VRApplication_Background);  // never starts SteamVR
+    if (error != vr::VRInitError_None) {
+        std::fprintf(stderr, "SteamVR is not available: %s\n", vr::VR_GetVRInitErrorAsEnglishDescription(error));
+        return 1;
+    }
+    vr::IVRCompositor* compositor = vr::VRCompositor();
+    const int compositorPid = findProcess("/proc", "vrcompositor");
+    // FrameColor's layer only runs while the compositor presents frames. GetFrameTimings keeps
+    // returning its history when the headset is off, so the newest frame index and
+    // vrcompositor's GPU time must both advance.
+    bool presenting = false;
+    if (compositor != nullptr) {
+        const DrmGpuUsage gpuBefore = readDrmGpuUsage("/proc", compositorPid);
+        const uint32_t frameBefore = newestFrame(compositor);
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        const auto busy = drmEngineDeltaNs(gpuBefore, readDrmGpuUsage("/proc", compositorPid));
+        if (!busy) {
+            std::fprintf(stderr, "vrcompositor has no drm-engine-gpu in its fdinfo; cannot measure.\n");
+            vr::VR_Shutdown();
+            return 1;
+        }
+        presenting = newestFrame(compositor) > frameBefore && *busy > 0;
+    }
+    if (!presenting) {
+        std::fprintf(stderr, "No frames are being presented. Put the headset on and start a scene.\n");
+        vr::VR_Shutdown();
+        return 1;
+    }
+    // Keep the settings from before the run on disk, so an unclean exit can be undone.
+    if (!writeFileAtomically(backup, *original)) {
+        std::fprintf(stderr, "Could not write %s; nothing was changed.\n", backup.c_str());
+        vr::VR_Shutdown();
+        return 1;
+    }
+
+    std::printf("Comparing sharpness %.0f%% and %.0f%%: %d pairs, 2 s per value (about %d s).\n"
+                "Keep the headset on and the scene still, and do not touch the dashboard.\n",
+                sharpnessA * 100.0, sharpnessB * 100.0, pairs, pairs * 5);
+    std::fflush(stdout);
+    gCompareStop = 0;
+    const int signals[] = {SIGINT, SIGTERM, SIGHUP, SIGQUIT};
+    std::vector<void (*)(int)> oldHandlers;
+    for (int s : signals) oldHandlers.push_back(std::signal(s, compareStopHandler));
+
+    std::string lastWritten = *original;
+    // One window: check that nothing else (the dashboard) changed the file, set the sharpness,
+    // let the layer pick it up (it rereads the file every 50 ms), then measure for 2 s.
+    auto window = [&](double sharpness, double& msPerFrame) -> WindowResult {
+        if (gCompareStop) return WindowResult::Stopped;
+        if (readFile(path) != lastWritten) return WindowResult::ChangedByOther;
+        const std::string text = *currentWithSharpness(*original, sharpness);
+        if (!writeFileAtomically(path, text)) return WindowResult::WriteFailed;
+        lastWritten = text;
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        const DrmGpuUsage before = readDrmGpuUsage("/proc", compositorPid);
+        const uint32_t frameBefore = newestFrame(compositor);
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+        const DrmGpuUsage after = readDrmGpuUsage("/proc", compositorPid);
+        const uint32_t frameAfter = newestFrame(compositor);
+        if (gCompareStop) return WindowResult::Stopped;
+        if (frameAfter <= frameBefore) return WindowResult::NoFrames;
+        const auto busy = drmEngineDeltaNs(before, after);
+        if (!busy) return WindowResult::NoGpuTime;
+        msPerFrame = *busy / 1e6 / (frameAfter - frameBefore);  // per frame actually presented
+        return WindowResult::Ok;
+    };
+    std::vector<std::pair<double, double>> results;
+    WindowResult result = WindowResult::Ok;
+    for (int i = 0; i < pairs && result == WindowResult::Ok; ++i) {
+        // Alternate the order (AB, BA, ...) so slow drift does not favour either value.
+        double a = 0.0, b = 0.0;
+        result = i % 2 == 0 ? window(sharpnessA, a) : window(sharpnessB, b);
+        if (result == WindowResult::Ok) result = i % 2 == 0 ? window(sharpnessB, b) : window(sharpnessA, a);
+        if (result == WindowResult::Ok) results.emplace_back(a, b);
+    }
+
+    // Restore, unless something else wrote the file in the meantime: then its content wins.
+    bool restored = false;
+    const bool changedByOther = readFile(path) != lastWritten;
+    if (!changedByOther) restored = writeFileAtomically(path, *original);
+    if (restored || (changedByOther && lastWritten == *original)) std::filesystem::remove(backup);
+    for (size_t i = 0; i < std::size(signals); ++i) std::signal(signals[i], oldHandlers[i]);
+    vr::VR_Shutdown();
+
+    switch (result) {
+        case WindowResult::Stopped: std::printf("Stopped early.\n"); break;
+        case WindowResult::ChangedByOther:
+            std::fprintf(stderr, "Something else (the dashboard?) changed %s during the run, so the run "
+                                 "stopped.\n", path.c_str());
+            break;
+        case WindowResult::WriteFailed: std::fprintf(stderr, "Could not write %s.\n", path.c_str()); break;
+        case WindowResult::NoFrames:
+            std::fprintf(stderr, "Frames stopped being presented (headset taken off?), so the run stopped.\n");
+            break;
+        case WindowResult::NoGpuTime: std::fprintf(stderr, "Could not read vrcompositor's GPU time.\n"); break;
+        case WindowResult::Ok: break;
+    }
+    if (changedByOther && lastWritten != *original)
+        std::fprintf(stderr, "Left %s as the other program wrote it. Your settings from before the run are in %s.\n",
+                     path.c_str(), backup.c_str());
+    else if (!changedByOther && !restored)
+        std::fprintf(stderr, "Could not restore %s. Your settings from before the run are in %s.\n", path.c_str(),
+                     backup.c_str());
+
+    const PairStats s = pairedStats(results);
+    if (s.pairs == 0) return 1;
+    std::printf("\nFrameColor bench --compare (%zu pairs%s)\n", s.pairs,
+                result == WindowResult::Ok ? "" : ", incomplete");
+    std::printf("  sharpness %3.0f%%       %.2f ms/frame (vrcompositor GPU, includes FrameColor)\n",
+                sharpnessA * 100.0, s.meanA);
+    std::printf("  sharpness %3.0f%%       %.2f ms/frame\n", sharpnessB * 100.0, s.meanB);
+    if (s.pairs >= 2)
+        std::printf("  difference          %+.2f ms/frame (95%% interval ±%.2f)\n", s.meanDiff, s.ci95);
+    else
+        std::printf("  difference          %+.2f ms/frame (one pair; no interval)\n", s.meanDiff);
+    const std::vector<double> now = currentValues();
+    std::printf("  sharpen area        %s\n", now.size() >= 15 && now[14] > 0.5 ? "whole image" : "center");
+    return result == WindowResult::Ok && restored ? 0 : 1;
 }

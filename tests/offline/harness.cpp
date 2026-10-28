@@ -56,8 +56,7 @@ int main(int argc, char** argv) {
     assert(hit && hit->kind == HitKind::SharpenArea);
     assert(hitTest(hits, kTrackX - 20, 719)->kind == HitKind::Slider);  // the button stays clear of the track
     {
-        VrOverlay* overlayUnused = nullptr;
-        activate(*hit, 0, ui, *overlayUnused);  // SharpenArea does not touch the overlay
+        activate(*hit, 0, ui, nullptr);
     }
     assert(ui.sharpenWhole);
     { auto v = readCurrent(); assert(v.size() == 15 && v[14] == 1.0); }
@@ -69,18 +68,17 @@ int main(int argc, char** argv) {
     hit = hitTest(hits, 1155 - 160 - 15 - 220 - 15 - 100, 42);
     assert(hit && hit->kind == HitKind::AutoCompare);
     {
-        VrOverlay* overlayUnused = nullptr;
-        activate(*hit, 0, ui, *overlayUnused);
+        activate(*hit, 0, ui, nullptr);
         assert(ui.autoCompare && ui.autoOriginal);
         { auto v = readCurrent(); assert(v[13] == 1.0); }
         assert(ui.autoCompareEnd - ui.autoCompareTurnEnd == kAutoCompareLength - kAutoCompareTurn);
-        activate(*hit, 0, ui, *overlayUnused);
+        activate(*hit, 0, ui, nullptr);
         assert(!ui.autoCompare && !ui.autoOriginal);
         { auto v = readCurrent(); assert(v[13] == 0.0); }
 
         // The timeline: a switch every 3 s, one switch after a stall, off at 60 s
         ui.saveMode = true;
-        activate(*hit, 0, ui, *overlayUnused);
+        activate(*hit, 0, ui, nullptr);
         assert(!ui.saveMode);  // starting auto compare leaves save mode
         const auto t0 = ui.autoCompareEnd - kAutoCompareLength;
         assert(!tickAutoCompare(ui, t0 + std::chrono::milliseconds(2900)) && ui.autoOriginal);
@@ -101,8 +99,7 @@ int main(int argc, char** argv) {
     render(fonts, ui, -1, -1, rgba, hits);
     hit = hitTest(hits, 1155 - 160 - 15 - 110, 42);
     assert(hit && hit->kind == HitKind::Compare);
-    VrOverlay* noOverlay = nullptr;
-    activate(*hit, 0, ui, *noOverlay);  // Compare does not touch the overlay
+    activate(*hit, 0, ui, nullptr);
     assert(ui.compare);
     { auto v = readCurrent(); assert(v.size() == 15 && v[13] == 1.0); }
     ui.compare = false; assert(saveAdvancedValues(ui));
@@ -228,6 +225,28 @@ int main(int argc, char** argv) {
     after.engineNs = {{"116", 150}, {"118", 1600}, {"121", 99999}};
     assert(drmEngineDeltaNs(before, after) == 650u);
     assert(!drmEngineDeltaNs(DrmGpuUsage{}, after));
+
+    // --- bench --compare: paired statistics and the current.txt it writes ---
+    {
+        const PairStats p = pairedStats({{2.0, 2.4}, {1.8, 2.3}, {2.2, 2.5}});
+        assert(p.pairs == 3 && std::abs(p.meanA - 2.0) < 1e-9 && std::abs(p.meanB - 2.4) < 1e-9);
+        assert(std::abs(p.meanDiff - 0.4) < 1e-9);
+        // differences 0.4, 0.5, 0.3: sample sd 0.1; 95% interval t(2) * 0.1 / sqrt(3)
+        assert(std::abs(p.ci95 - 4.303 * 0.1 / std::sqrt(3.0)) < 1e-9);
+        assert(pairedStats({}).pairs == 0 && pairedStats({{1.0, 2.0}}).ci95 == 0.0);
+        assert(studentT95(0) == 0.0 && studentT95(11) == 2.201 && studentT95(30) == 2.042);
+        assert(studentT95(59) < 2.042 && studentT95(59) > 1.98);
+        // Command-line numbers: whole, in range, no leading zeros
+        assert(parseIntArg("0", 0, 100) == 0 && parseIntArg("60", 0, 100) == 60 && parseIntArg("100", 0, 100) == 100);
+        for (const char* bad : {"", "-5", "101", "010", "0100", "0.6", "6a", "99999999999999999999"})
+            assert(!parseIntArg(bad, 0, 100));
+        assert(!parseIntArg("4", 5, 60) && parseIntArg("5", 5, 60) == 5 && !parseIntArg(nullptr, 0, 100));
+        const auto with = currentWithSharpness("0 0 0 1.12 1.12 1.12 1 1 1 1.2 1.2 1.2 0.6 0 1\n", 0.35);
+        assert(with && *with == "0 0 0 1.12 1.12 1.12 1 1 1 1.2 1.2 1.2 0.35 0 1\n");
+        assert(*currentWithSharpness("0 0 0 1 1 1 1 1 1 1 1 1\n", 1.0) == "0 0 0 1 1 1 1 1 1 1 1 1 1\n");
+        assert(!currentWithSharpness("0 0 0 1 1 1\n", 0.5) && !currentWithSharpness("", 0.5));
+        assert(!currentWithSharpness("0 0 0 1 1 1 1 1 1 1 1 nan\n", 0.5));
+    }
 
     // --- Language codes and automatic detection ---
     assert(matchLanguage("koreana") == Language::Korean);
