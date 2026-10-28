@@ -37,9 +37,15 @@ namespace vkBasalt
         VkDescriptorSetLayout lutDescriptorSetLayout;
         VkDescriptorPool      lutDescriptorPool;
         VkDescriptorSet       lutDescriptorSet;
+        VkBuffer              sharpenBuffer;
+        VkDeviceMemory        sharpenMemory;
+        float*                pSharpenAmount = nullptr;
+        VkDescriptorSetLayout sharpenDescriptorSetLayout;
+        VkDescriptorPool      sharpenDescriptorPool;
+        VkDescriptorSet       sharpenDescriptorSet;
         uint32_t              lutSize = 0;
         bool                  hasFrameColorValues = false;
-        std::array<float, 12> frameColorValues{};
+        std::array<float, 13> frameColorValues{};
         std::chrono::steady_clock::time_point nextFrameColorCheck{};
     };
 } // namespace vkBasalt

@@ -30,9 +30,13 @@ FrameColorでは対象を `vrcompositor` に限定し，ユーザー設定に応
 更新します．また，使用しないエフェクト，入力フック，深度キャプチャ，
 画像ローダー，ReShadeコンパイラーの機能を除いています．
 
-ソースと配布用アーカイブには，NVIDIA FXAA，AMD CAS，SMAA，DLS，ReShade
+ソースと配布用アーカイブには，NVIDIA FXAA，SMAA，DLS，ReShade
 コンパイラー，stb画像ローダー，SPIRV-Headersのファイルは含まれません．
-残した二つのGLSLシェーダーはvkBasalt由来です．
+残した二つのGLSLシェーダーはvkBasalt由来です．`lut.frag.glsl` には，
+vkBasaltの `cas.frag.glsl` にあるシャープ化処理も含まれます．これはAMD
+FidelityFX Contrast Adaptive Sharpeningの実装です（MIT，Copyright (c)
+2017-2019 Advanced Micro Devices, Inc.）．ライセンス表記はそのシェーダー内に
+保存しています．
 
 ## システム側の依存関係
 

@@ -75,6 +75,28 @@ namespace vkBasalt
 
         lutDescriptorPool = createDescriptorPool(pLogicalDevice, poolSizes);
 
+        // The sharpen amount lives in a mapped uniform buffer, so slider
+        // changes do not need new pipelines or re-recorded command buffers.
+        createBuffer(pLogicalDevice,
+                     sizeof(float) * 4,
+                     VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                     sharpenBuffer,
+                     sharpenMemory);
+        VkResult result = pLogicalDevice->vkd.MapMemory(
+            pLogicalDevice->device, sharpenMemory, 0, VK_WHOLE_SIZE, 0, reinterpret_cast<void**>(&pSharpenAmount));
+        ASSERT_VULKAN(result);
+        *pSharpenAmount = 0.0f;
+
+        sharpenDescriptorSetLayout = createUniformBufferDescriptorSetLayout(pLogicalDevice);
+        descriptorSetLayouts.push_back(sharpenDescriptorSetLayout);
+
+        VkDescriptorPoolSize bufferPoolSize;
+        bufferPoolSize.type            = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        bufferPoolSize.descriptorCount = 1;
+
+        sharpenDescriptorPool = createDescriptorPool(pLogicalDevice, {bufferPoolSize});
+
         init(pLogicalDevice, format, imageExtent, inputImages, outputImages, pConfig);
 
         lutDescriptorSet =
@@ -83,6 +105,8 @@ namespace vkBasalt
                                                        lutDescriptorSetLayout,
                                                        {sampler},
                                                        std::vector<std::vector<VkImageView>>(1, std::vector<VkImageView>(1, lutImageView)))[0];
+
+        sharpenDescriptorSet = writeBufferDescriptorSet(pLogicalDevice, sharpenDescriptorPool, sharpenDescriptorSetLayout, sharpenBuffer);
     }
     LutEffect::~LutEffect()
     {
@@ -91,11 +115,23 @@ namespace vkBasalt
         pLogicalDevice->vkd.DestroyDescriptorSetLayout(pLogicalDevice->device, lutDescriptorSetLayout, nullptr);
         pLogicalDevice->vkd.DestroyDescriptorPool(pLogicalDevice->device, lutDescriptorPool, nullptr);
         pLogicalDevice->vkd.FreeMemory(pLogicalDevice->device, lutMemory, nullptr);
+        pLogicalDevice->vkd.UnmapMemory(pLogicalDevice->device, sharpenMemory);
+        pLogicalDevice->vkd.DestroyBuffer(pLogicalDevice->device, sharpenBuffer, nullptr);
+        pLogicalDevice->vkd.FreeMemory(pLogicalDevice->device, sharpenMemory, nullptr);
+        pLogicalDevice->vkd.DestroyDescriptorSetLayout(pLogicalDevice->device, sharpenDescriptorSetLayout, nullptr);
+        pLogicalDevice->vkd.DestroyDescriptorPool(pLogicalDevice->device, sharpenDescriptorPool, nullptr);
     }
     void LutEffect::applyEffect(uint32_t imageIndex, VkCommandBuffer commandBuffer)
     {
-        pLogicalDevice->vkd.CmdBindDescriptorSets(
-            commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 1, 1, &(lutDescriptorSet), 0, nullptr);
+        const std::array<VkDescriptorSet, 2> descriptorSets{{lutDescriptorSet, sharpenDescriptorSet}};
+        pLogicalDevice->vkd.CmdBindDescriptorSets(commandBuffer,
+                                                  VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                                  pipelineLayout,
+                                                  1,
+                                                  static_cast<uint32_t>(descriptorSets.size()),
+                                                  descriptorSets.data(),
+                                                  0,
+                                                  nullptr);
         SimpleEffect::applyEffect(imageIndex, commandBuffer);
     }
     void LutEffect::updateEffect()
@@ -111,8 +147,8 @@ namespace vkBasalt
         const char* xdgConfig = std::getenv("XDG_CONFIG_HOME");
         const std::string configRoot = xdgConfig && *xdgConfig ? xdgConfig : std::string(home) + "/.config";
         std::ifstream valuesFile(configRoot + "/framecolor/current.txt");
-        std::array<float, 12> values{{0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f,
-                                      1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f}};
+        std::array<float, 13> values{{0.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f,
+                                      1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.0f}};
         std::vector<float> stored;
         for (float value; valuesFile >> value;)
             stored.push_back(value);
@@ -120,65 +156,80 @@ namespace vkBasalt
             return;
         for (size_t i = 0; i < std::min(stored.size(), values.size()); ++i)
             values[i] = stored[i];
-        // Older files have no gain or saturation fields. The ten-value file
-        // used one saturation setting for all three output channels.
+        // Older files have no gain, saturation or sharpen fields. The ten-value
+        // file used one saturation setting for all three output channels.
         if (stored.size() == 10)
             values[10] = values[11] = values[9];
         if (!std::all_of(values.begin(), values.end(), [](float value) { return std::isfinite(value); }))
             return;
         if (hasFrameColorValues && values == frameColorValues)
             return;
+        const bool lookChanged =
+            !hasFrameColorValues || !std::equal(values.begin(), values.begin() + 12, frameColorValues.begin());
+        const bool sharpenChanged = !hasFrameColorValues || values[12] != frameColorValues[12];
 
-        std::array<std::array<unsigned char, 65>, 3> curves{};
-        for (uint32_t channel = 0; channel < 3; ++channel)
+        std::vector<unsigned char> pixels;
+        if (lookChanged)
         {
-            float contrast = std::clamp(values[channel], 0.0f, 1.0f);
-            float gamma = std::clamp(values[channel + 3], 0.50f, 2.50f);
-            float gain = std::clamp(values[channel + 6], 0.50f, 1.50f);
-            for (uint32_t point = 0; point < lutSize; ++point)
+            std::array<std::array<unsigned char, 65>, 3> curves{};
+            for (uint32_t channel = 0; channel < 3; ++channel)
             {
-                float x = static_cast<float>(point) / static_cast<float>(lutSize - 1);
-                float color = std::pow(std::clamp(x * gain, 0.0f, 1.0f), 1.0f / gamma);
-                float smooth = color * color * (3.0f - 2.0f * color);
-                float corrected = std::clamp(color * (1.0f - contrast) + smooth * contrast, 0.0f, 1.0f);
-                curves[channel][point] = static_cast<unsigned char>(std::lround(corrected * 255.0f));
-            }
-        }
-        std::vector<unsigned char> pixels(lutSize * lutSize * lutSize * 4, 255);
-        const std::array<float, 3> saturation{{std::clamp(values[9], 0.0f, 2.0f),
-                                                std::clamp(values[10], 0.0f, 2.0f),
-                                                std::clamp(values[11], 0.0f, 2.0f)}};
-        for (uint32_t blue = 0; blue < lutSize; ++blue)
-            for (uint32_t green = 0; green < lutSize; ++green)
-                for (uint32_t red = 0; red < lutSize; ++red)
+                float contrast = std::clamp(values[channel], 0.0f, 1.0f);
+                float gamma = std::clamp(values[channel + 3], 0.50f, 2.50f);
+                float gain = std::clamp(values[channel + 6], 0.50f, 1.50f);
+                for (uint32_t point = 0; point < lutSize; ++point)
                 {
-                    size_t offset = ((blue * lutSize + green) * lutSize + red) * 4;
-                    if (saturation == std::array<float, 3>{{1.0f, 1.0f, 1.0f}})
-                    {
-                        pixels[offset] = curves[0][red];
-                        pixels[offset + 1] = curves[1][green];
-                        pixels[offset + 2] = curves[2][blue];
-                        continue;
-                    }
-                    const float r = curves[0][red] / 255.0f;
-                    const float g = curves[1][green] / 255.0f;
-                    const float b = curves[2][blue] / 255.0f;
-                    const float luminance = 0.2126f * r + 0.7152f * g + 0.0722f * b;
-                    pixels[offset] = static_cast<unsigned char>(std::lround(
-                        std::clamp(luminance + (r - luminance) * saturation[0], 0.0f, 1.0f) * 255.0f));
-                    pixels[offset + 1] = static_cast<unsigned char>(std::lround(
-                        std::clamp(luminance + (g - luminance) * saturation[1], 0.0f, 1.0f) * 255.0f));
-                    pixels[offset + 2] = static_cast<unsigned char>(std::lround(
-                        std::clamp(luminance + (b - luminance) * saturation[2], 0.0f, 1.0f) * 255.0f));
+                    float x = static_cast<float>(point) / static_cast<float>(lutSize - 1);
+                    float color = std::pow(std::clamp(x * gain, 0.0f, 1.0f), 1.0f / gamma);
+                    float smooth = color * color * (3.0f - 2.0f * color);
+                    float corrected = std::clamp(color * (1.0f - contrast) + smooth * contrast, 0.0f, 1.0f);
+                    curves[channel][point] = static_cast<unsigned char>(std::lround(corrected * 255.0f));
                 }
+            }
+            pixels.assign(lutSize * lutSize * lutSize * 4, 255);
+            const std::array<float, 3> saturation{{std::clamp(values[9], 0.0f, 2.0f),
+                                                    std::clamp(values[10], 0.0f, 2.0f),
+                                                    std::clamp(values[11], 0.0f, 2.0f)}};
+            for (uint32_t blue = 0; blue < lutSize; ++blue)
+                for (uint32_t green = 0; green < lutSize; ++green)
+                    for (uint32_t red = 0; red < lutSize; ++red)
+                    {
+                        size_t offset = ((blue * lutSize + green) * lutSize + red) * 4;
+                        if (saturation == std::array<float, 3>{{1.0f, 1.0f, 1.0f}})
+                        {
+                            pixels[offset] = curves[0][red];
+                            pixels[offset + 1] = curves[1][green];
+                            pixels[offset + 2] = curves[2][blue];
+                            continue;
+                        }
+                        const float r = curves[0][red] / 255.0f;
+                        const float g = curves[1][green] / 255.0f;
+                        const float b = curves[2][blue] / 255.0f;
+                        const float luminance = 0.2126f * r + 0.7152f * g + 0.0722f * b;
+                        pixels[offset] = static_cast<unsigned char>(std::lround(
+                            std::clamp(luminance + (r - luminance) * saturation[0], 0.0f, 1.0f) * 255.0f));
+                        pixels[offset + 1] = static_cast<unsigned char>(std::lround(
+                            std::clamp(luminance + (g - luminance) * saturation[1], 0.0f, 1.0f) * 255.0f));
+                        pixels[offset + 2] = static_cast<unsigned char>(std::lround(
+                            std::clamp(luminance + (b - luminance) * saturation[2], 0.0f, 1.0f) * 255.0f));
+                    }
+        }
 
-        // A previous present can still sample this image. Dashboard writes are
-        // throttled, so wait before replacing its contents in place.
+        // A previous present can still read this image and buffer. Dashboard
+        // writes are throttled, so wait before replacing them in place.
         pLogicalDevice->vkd.QueueWaitIdle(pLogicalDevice->queue);
-        uploadToImage(pLogicalDevice, lutImage, {lutSize, lutSize, lutSize}, static_cast<uint32_t>(pixels.size()),
-                      pixels.data(), 1, true);
+        if (lookChanged)
+        {
+            uploadToImage(pLogicalDevice, lutImage, {lutSize, lutSize, lutSize}, static_cast<uint32_t>(pixels.size()),
+                          pixels.data(), 1, true);
+            Logger::info("FrameColor live LUT updated");
+        }
+        if (sharpenChanged)
+        {
+            *pSharpenAmount = std::clamp(values[12], 0.0f, 1.0f);
+            Logger::info("FrameColor sharpen amount " + std::to_string(*pSharpenAmount));
+        }
         frameColorValues = values;
         hasFrameColorValues = true;
-        Logger::info("FrameColor live LUT updated");
     }
 } // namespace vkBasalt

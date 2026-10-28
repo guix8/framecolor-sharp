@@ -20,7 +20,7 @@ namespace {
 constexpr const char* kDashboardKey = "local.framecolor";
 constexpr const char* kDashboardName = "Display";
 // The panel image is shown 2.8 m wide (about the same px-to-meter ratio as v2's 1024px / 2.4m;
-// height works out to roughly 1.52m)
+// height works out to roughly 1.84m)
 constexpr float kDashboardWidthM = 2.8f;
 // On shutdown, how long to wait after clearing the overlay before VR_Shutdown (about 36 frames at 90Hz)
 constexpr int kShutdownWaitMs = 400;

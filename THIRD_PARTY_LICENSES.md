@@ -26,9 +26,12 @@ limits the layer to `vrcompositor`, updates the LUT from user settings, and
 removes unused effects, input hooks, depth capture, image loaders, and
 ReShade compiler support.
 
-The source and binary release contain no NVIDIA FXAA, AMD CAS, SMAA, DLS,
-ReShade compiler, stb image loader, or SPIRV-Headers files. The two retained
-GLSL shaders are from vkBasalt.
+The source and binary release contain no NVIDIA FXAA, SMAA, DLS, ReShade
+compiler, stb image loader, or SPIRV-Headers files. The two retained GLSL
+shaders are from vkBasalt. `lut.frag.glsl` also includes the sharpening code
+from vkBasalt's `cas.frag.glsl`, an implementation of AMD FidelityFX
+Contrast Adaptive Sharpening (MIT, Copyright (c) 2017-2019 Advanced Micro
+Devices, Inc.). Its license notice is preserved in that shader.
 
 ## System-provided dependencies
 

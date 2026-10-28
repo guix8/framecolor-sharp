@@ -22,7 +22,7 @@
 namespace {
 
 constexpr int kWidth = 1200;
-constexpr int kHeight = 700;
+constexpr int kHeight = 790;
 constexpr int kThumb = 256;
 constexpr const char* kFont = "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc";
 constexpr const char* kBold = "/usr/share/fonts/noto-cjk/NotoSansCJK-Bold.ttc";
@@ -53,6 +53,7 @@ struct Values {
     std::array<double, 3> channelContrast{{0.0, 0.0, 0.0}};
     std::array<double, 3> gamma{{1.0, 1.0, 1.0}};
     std::array<double, 3> saturation{{1.0, 1.0, 1.0}};
+    double sharpen = 0.0;
 };
 
 struct Preset { Values values; bool valid = false; };
@@ -141,6 +142,7 @@ void loadAdvancedValues(Values& values) {
         } else if (stored.size() >= 10) {
             values.saturation.fill(clamp(stored[9], 0.0, 2.0));
         }
+        if (stored.size() >= 13) values.sharpen = clamp(stored[12], 0.0, 1.0);
     } else {
         values.channelContrast = {values.contrast, values.contrast, values.contrast};
         values.gamma = {1.0, 1.0, 1.0};
@@ -160,7 +162,7 @@ bool saveAdvancedValues(UiState& ui) {
         << ui.values.gamma[0] << ' ' << ui.values.gamma[1] << ' ' << ui.values.gamma[2] << ' '
         << ui.values.red << ' ' << ui.values.green << ' ' << ui.values.blue << ' '
         << ui.values.saturation[0] << ' ' << ui.values.saturation[1] << ' '
-        << ui.values.saturation[2] << '\n';
+        << ui.values.saturation[2] << ' ' << ui.values.sharpen << '\n';
     out.close();
     std::filesystem::rename(temporary, path, ec);
     if (ec) { std::filesystem::remove(temporary); ui.message = "詳細設定を保存できません"; return false; }
@@ -189,6 +191,7 @@ void loadCustomPresets(UiState& ui) {
         } else if (!storedSaturation.empty()) {
             preset.values.saturation.fill(clamp(storedSaturation[0], 0.0, 2.0));
         }
+        if (storedSaturation.size() >= 4) preset.values.sharpen = clamp(storedSaturation[3], 0.0, 1.0);
         preset.valid = valid != 0;
     }
 }
@@ -207,7 +210,8 @@ bool saveCustomPresets(UiState& ui) {
             << v.red << ' ' << v.green << ' ' << v.blue << ' '
             << v.channelContrast[0] << ' ' << v.channelContrast[1] << ' ' << v.channelContrast[2] << ' '
             << v.gamma[0] << ' ' << v.gamma[1] << ' ' << v.gamma[2] << ' '
-            << v.saturation[0] << ' ' << v.saturation[1] << ' ' << v.saturation[2] << '\n';
+            << v.saturation[0] << ' ' << v.saturation[1] << ' ' << v.saturation[2] << ' '
+            << v.sharpen << '\n';
     }
     out.close();
     std::filesystem::rename(temporary, path, ec);
@@ -323,6 +327,10 @@ void updateSlider(UiState& ui, int index, double pointerX) {
         const double next = std::round(fraction * 200.0) / 100.0;
         setSelectedArrayValue(ui.values.saturation, ui.channel, next, 0.0, 2.0);
         ui.lookDirty = true;
+    } else if (index == 5) {
+        // Sharpening applies to all channels, like panel brightness.
+        ui.values.sharpen = std::round(fraction * 100.0) / 100.0;
+        ui.lookDirty = true;
     }
 }
 
@@ -360,8 +368,9 @@ void render(const FontSet& fonts, const UiState& ui, double pointerX, double poi
            selectedArrayValue(ui.values.channelContrast, ui.channel), 0.0, 1.0, 2, ui.vulkanLayerActive);
     slider(p, hits, 590, "ガンマ",
            selectedArrayValue(ui.values.gamma, ui.channel), 0.50, 2.50, 3, ui.vulkanLayerActive);
+    slider(p, hits, 680, "シャープネス", ui.values.sharpen, 0.0, 1.0, 5, ui.vulkanLayerActive);
 
-    if (!ui.message.empty()) p.text(45, 680, ui.message, 20, ui.message.find("失敗") == std::string::npos ? kGreen : kRed);
+    if (!ui.message.empty()) p.text(45, 770, ui.message, 20, ui.message.find("失敗") == std::string::npos ? kGreen : kRed);
 
     if (ui.channelOpen) {
         fillRect(p, 885, 307, 270, 224, kBg, 10); strokeRect(p, 885, 307, 270, 224, kAccent, 10);
